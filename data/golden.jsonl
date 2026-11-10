@@ -1,0 +1,25 @@
+{"id": "1", "text": "No me llegó la factura de octubre", "label": "billing", "expect": "classify"}
+{"id": "2", "text": "Me hicieron un cobro doble en mi tarjeta", "label": "billing", "expect": "classify"}
+{"id": "3", "text": "Quiero un reembolso del pago de ayer", "label": "billing", "expect": "classify"}
+{"id": "4", "text": "Necesito la invoice del mes pasado", "label": "billing", "expect": "classify"}
+{"id": "5", "text": "Hay un charge que no reconozco", "label": "billing", "expect": "classify"}
+{"id": "6", "text": "La app muestra un error al guardar", "label": "bug", "expect": "classify"}
+{"id": "7", "text": "El reporte no funciona desde el lunes", "label": "bug", "expect": "classify"}
+{"id": "8", "text": "La página se cuelga al subir un archivo", "label": "bug", "expect": "classify"}
+{"id": "9", "text": "Veo un crash cuando abro la configuración", "label": "bug", "expect": "classify"}
+{"id": "10", "text": "Encontré un bug en el filtro de fechas", "label": "bug", "expect": "classify"}
+{"id": "11", "text": "Olvidé mi contraseña y no puedo entrar", "label": "access", "expect": "classify"}
+{"id": "12", "text": "Mi cuenta bloqueada desde esta mañana", "label": "access", "expect": "classify"}
+{"id": "13", "text": "No tengo acceso al panel de administración", "label": "access", "expect": "classify"}
+{"id": "14", "text": "El login me rechaza el password nuevo", "label": "access", "expect": "classify"}
+{"id": "15", "text": "Cuenta locked after three attempts", "label": "access", "expect": "classify"}
+{"id": "16", "text": "Quisiera saber los horarios de atención", "label": "other", "expect": "classify"}
+{"id": "17", "text": "¿Tienen descuentos para estudiantes?", "label": "other", "expect": "classify"}
+{"id": "18", "text": "Me gustaría enviar una sugerencia sobre el diseño", "label": "other", "expect": "classify"}
+{"id": "19", "text": "Gracias por la ayuda de ayer", "label": "other", "expect": "classify"}
+{"id": "20", "text": "¿Dónde queda su oficina principal?", "label": "other", "expect": "classify"}
+{"id": "21", "text": "Mi pago falló y además la app muestra un error", "label": "billing", "expect": "classify"}
+{"id": "22", "text": "No puedo entrar y tampoco me llega la factura", "label": "access", "expect": "classify"}
+{"id": "23", "text": "   ", "label": null, "expect": "reject"}
+{"id": "24", "text": "ok", "label": null, "expect": "reject"}
+{"id": "25", "text": "", "label": null, "expect": "reject"}

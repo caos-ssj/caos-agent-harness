@@ -1,0 +1,20 @@
+# caos-agent-harness project file. Paths are relative to this file.
+[board]
+db = ".harness/board.db"
+trace = ".harness/trace.db"
+
+# Fast testing / simulated agent
+[agents.echo]
+command = ["cat"]
+timeout = 30
+
+# Local LLM agents via Ollama
+[agents.llama]
+command = ["ollama", "run", "llama3.2:3b"]
+system = "llama3.2:3b"
+timeout = 180
+
+[agents.qwen]
+command = ["ollama", "run", "qwen2.5:7b"]
+system = "qwen2.5:7b"
+timeout = 300

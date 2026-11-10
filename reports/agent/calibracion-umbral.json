@@ -1,0 +1,43 @@
+{
+  "n_answerable_calib": 168,
+  "n_top1_ok": 149,
+  "n_oos_calib": 30,
+  "threshold": 1.01,
+  "curve": [
+    {
+      "threshold": 1.0,
+      "kept_answerable": "149/149",
+      "rejected_oos": "6/30"
+    },
+    {
+      "threshold": 1.01,
+      "kept_answerable": "137/149",
+      "rejected_oos": "25/30"
+    },
+    {
+      "threshold": 1.05,
+      "kept_answerable": "136/149",
+      "rejected_oos": "25/30"
+    },
+    {
+      "threshold": 1.1,
+      "kept_answerable": "130/149",
+      "rejected_oos": "25/30"
+    },
+    {
+      "threshold": 1.15,
+      "kept_answerable": "122/149",
+      "rejected_oos": "25/30"
+    },
+    {
+      "threshold": 1.2,
+      "kept_answerable": "108/149",
+      "rejected_oos": "26/30"
+    },
+    {
+      "threshold": 1.3,
+      "kept_answerable": "56/149",
+      "rejected_oos": "30/30"
+    }
+  ]
+}

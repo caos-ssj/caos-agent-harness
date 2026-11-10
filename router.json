@@ -1,0 +1,2 @@
+{"_": "Minimum lower bound of the 95 % interval of precision that each cost-of-error tier accepts. Below it, the task goes to a person.",
+ "low": 0.75, "medium": 0.85, "high": 0.90, "critical": 0.95}

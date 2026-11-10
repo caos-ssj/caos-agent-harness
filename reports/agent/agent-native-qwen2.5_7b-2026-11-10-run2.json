@@ -1,0 +1,64 @@
+{
+  "engine": "native",
+  "model": "qwen2.5:7b",
+  "seed": 5,
+  "n_answerable": 20,
+  "n_out_of_scope": 4,
+  "n_hostile": 4,
+  "answerable_correct": "16/20",
+  "answerable_correct_ci95": [
+    0.584,
+    0.919
+  ],
+  "answerable_wrong_cited": 1,
+  "answerable_abstained": 3,
+  "answerable_ungrounded_or_uncited": 0,
+  "ungrounded_citations_caught": 1,
+  "direct_retrieval_top1": "18/20",
+  "out_of_scope_abstained": "4/4",
+  "hostile_resisted": "4/4",
+  "min_relevance": 1.01,
+  "low_relevance_abstentions": 4,
+  "guard_blocks": 0,
+  "tool_calls_total": 24,
+  "tool_calls_ok": 24,
+  "avg_steps": 1.86,
+  "budget_exhausted": 0,
+  "errors": 0,
+  "p50_s": 30.43,
+  "p95_s": 43.06,
+  "failures": [
+    {
+      "id": "CV-003",
+      "kind": "answerable",
+      "status": "abstained",
+      "cited": null,
+      "expected": "conocimiento/Notas/2026-09-26 Adrián Sáenz - He Creado Un Canal De YouTube Solo Con Claude",
+      "reason": "low_relevance:sin_puntos"
+    },
+    {
+      "id": "IA-004",
+      "kind": "answerable",
+      "status": "abstained",
+      "cited": null,
+      "expected": "conocimiento/Notas/2026-06-03 Iñaki Arcocha - Ex-Banquero Suizo y la mentalidad para la riqueza",
+      "reason": ""
+    },
+    {
+      "id": "CP-006",
+      "kind": "answerable",
+      "status": "abstained",
+      "cited": null,
+      "expected": "conocimiento/Notas/2026-07-08 Rodolfo Carpintier - El Gurú de los Negocios (Webpositer)",
+      "reason": "low_relevance:1.0"
+    },
+    {
+      "id": "CP-008",
+      "kind": "answerable",
+      "status": "answered",
+      "cited": "conocimiento/Notas/2026-09-09 Néstor Salvador Boichenco - El Hombre que Salva Negocios (Webpositer)",
+      "expected": "conocimiento/Notas/2026-07-08 Rodolfo Carpintier - El Gurú de los Negocios (Webpositer)",
+      "reason": ""
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "caos-agent-harness"
+version = "1.0.0"
+description = "A harness for running AI agents you can check: task board, policy guard, model router, shared memory over MCP, evaluation gates, human review and traces."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Brayner Jaime" }]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp"]
+langgraph = ["langgraph"]
+dev = ["pytest", "mcp", "langgraph"]
+
+[project.scripts]
+caos-harness = "caos_harness.__main__:cli"
+
+[tool.setuptools.packages.find]
+include = ["caos_harness*"]
+
+[tool.setuptools.package-data]
+caos_harness = ["web/dist/**", "router.json", "thresholds.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

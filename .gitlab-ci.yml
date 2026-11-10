@@ -1,0 +1,10 @@
+image: python:3.12
+stages: [test]
+check:
+  stage: test
+  script:
+    - pip install -r requirements.txt
+    - make check
+  artifacts:
+    when: always
+    paths: [reports/]

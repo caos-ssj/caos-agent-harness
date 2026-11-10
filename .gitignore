@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+*.db
+.venv/
+.harness/
+web/node_modules/
+*.egg-info/
