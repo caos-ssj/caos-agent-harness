@@ -132,7 +132,7 @@ Raw results: [`reports/`](reports/).
 ```bash
 git clone https://gitlab.com/braynerssj26/caos-agent-harness.git && cd caos-agent-harness
 pip install -e '.[dev]'
-make check        # 133 tests, validation thresholds, regression gate, board demo, router table
+make check        # 137 tests, validation thresholds, regression gate, board demo, router table
 make mutation     # 26/26 injected faults detected
 ```
 
@@ -151,6 +151,21 @@ caos-harness run && caos-harness task list
 caos-harness review 1 redo "no evidence of the run"           # back to its agent, with the note first
 caos-harness serve                                  # the same board in the browser
 ```
+
+### The desk
+
+`caos-harness serve` opens one working screen, not a set of tabs: queues on the left, the tasks in the middle ordered by what needs you first, and the selected task's whole life on the right (what was asked, who got it and why, what came back, the trace) with the verdict controls under it. A line of figures sits above; each one names the command that produced it. **Console** (a local Ollama model) and **Library** (measured systems, the router, agents, skills, providers) are the other two views.
+
+![The desk on a new project: a guide that checks itself off as the board fills](docs/first-run.png)
+
+- **Keys:** `j` / `k` move through tasks, `n` writes a task, `r` runs what is pending, `⌘K` / `Ctrl+K` goes anywhere or finds a task by number or words, `Esc` closes.
+- **Preferences** are two and both are useful: density (comfortable or compact) and the view the page opens on. They are stored in your browser only.
+- **Sample data:** `python3 tools/seed_demo.py /tmp/harness-demo` builds a project of made-up tasks and canned answers; the page labels it "Sample data" so nobody mistakes it for a record.
+- Every figure comes from the board (`Board.stats()`), the task list, or a report a command wrote. There are no estimates.
+
+The CLI speaks in the same words, with colour only on a real terminal (never when piped, and never when `NO_COLOR` is set):
+
+![caos-harness, task list and status in a terminal](docs/cli.png)
 
 Every command is also available as `python -m caos_harness <command>` (`demo`, `route`, `eval`, `regress`, `mutation`, `benchmark`, `agent-eval`, `calibrate`, `skills`, `trace`). Design notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Español: [README.es.md](README.es.md).
 

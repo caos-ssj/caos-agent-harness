@@ -56,10 +56,19 @@ El ciclo de vida es el del tablero con el que coordiné mis propios agentes de c
 ## Uso
 ```bash
 pip install -r requirements.txt
-make check        # 133 pruebas, umbrales, compuerta de regresión, demo del tablero y tabla del router
+make check        # 137 pruebas, umbrales, compuerta de regresión, demo del tablero y tabla del router
 make mutation     # 26/26 fallos inyectados detectados
 python -m caos_harness            # todos los comandos
 ```
+### La mesa
+
+`caos-harness serve` abre una sola pantalla de trabajo: las colas a la izquierda, los encargos en el centro (primero lo que te espera) y, a la derecha, la vida completa del encargo elegido: qué se pidió, quién lo recibió y por qué, qué volvió y su traza, con el veredicto debajo. Arriba, una línea de cifras; cada una nombra el comando que la produjo. **Console** (modelo local con Ollama) y **Library** (sistemas medidos, router, agentes, skills, proveedores) son las otras dos vistas. La interfaz está en inglés.
+
+- **Teclas:** `j` / `k` recorren los encargos, `n` escribe uno, `r` ejecuta lo pendiente, `⌘K` / `Ctrl+K` va a cualquier sitio o busca un encargo por número o palabras.
+- **Preferencias:** solo dos, y las dos sirven: densidad (cómoda o compacta) y la vista con la que abre. Se guardan en tu navegador.
+- **Datos de ejemplo:** `python3 tools/seed_demo.py /tmp/harness-demo` crea un proyecto de encargos inventados; la página lo rotula «Sample data».
+- La CLI usa las mismas palabras, con color solo en una terminal real (nunca por tubería ni con `NO_COLOR`).
+
 La evaluación del agente necesita [Ollama](https://ollama.com) y una copia de caos-cerebro: `make agent-eval MODEL=qwen2.5:7b ENGINE=langgraph CEREBRO=/ruta/a/caos-cerebro`.
 
 Alcance: datos sintéticos, modelos locales en CPU, un servidor MCP; intervalos de Wilson al 95 %.

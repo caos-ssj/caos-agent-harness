@@ -31,6 +31,8 @@ A project folder with `harness.toml`; agents are commands. The operator adds tas
 ## Brand Commitments
 CAOS identity as recorded in the brand note of 2026-09-28: "nocturnal, sober". Palette: negro #060607, tinta #101013, borde #26262A, tenue #5C5C5A, gris #93938F, hueso #EDEAE5, champán #EBD3BB, ámbar #C9975C. Three voices: UnifrakturMaguntia for the name only; EB Garamond for the human voice; JetBrains Mono for evidence (figures, commands, paths). One warm element per piece. Square corners. The CLI carries the same identity (user, 2026-11-10).
 
+Interface decisions (2026-11-11, see docs/DESIGN-REVIEW.md): the dashboard is one working screen (the desk: queues, tasks by what needs the operator, the selected task's trace and verdict) plus Console and Library. Amber means "this needs you" and nothing else; the primary button is bone. Personalisation is density and start view only. The Spanish motto appears once, in the footer, as the brand's signature. Sample data is always labelled.
+
 ## Evidence on Hand
 Reports under `reports/` (agent eval, benchmarks, mutation), the deterministic demo (`make demo`), and aggregate use of the original board: 115 tasks between 2026-09-29 and 2026-11-09, 86 reviewed. No customers, testimonials or pricing exist; none may be shown.
 
