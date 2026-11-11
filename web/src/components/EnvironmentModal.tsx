@@ -3,7 +3,7 @@ import { X, Palette, Sparkles, Check, Sliders, LayoutGrid } from 'lucide-react'
 
 export interface EnvironmentSettings {
   accent: 'ambar' | 'esmeralda' | 'platino' | 'cian'
-  pattern: 'obsidian' | 'grid' | 'vignette'
+  pattern: 'obsidian' | 'vignette'
   density: 'comfortable' | 'compact'
 }
 
@@ -54,11 +54,6 @@ export const EnvironmentModal: React.FC<EnvironmentModalProps> = ({
       id: 'obsidian',
       label: 'Obsidiana Profundo (#060607)',
       desc: 'Plain house black.',
-    },
-    {
-      id: 'grid',
-      label: '24 px grid',
-      desc: 'A faint drafting grid.',
     },
     {
       id: 'vignette',

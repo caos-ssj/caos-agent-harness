@@ -106,7 +106,17 @@ def work(cmd: str, rest: list[str]) -> int:
             print("discarded" if ok else "only a pending task can be discarded")
             return 0 if ok else 1
         if cmd == "status":
-            print(json.dumps(b.stats(), indent=2))
+            st = b.stats()
+            if "--json" in rest or not sys.stdout.isatty():
+                print(json.dumps(st, indent=2))
+                return 0
+            from . import style
+            print(style.banner())
+            print(f"\n{st['tasks']} tasks · {st['returned_at_least_once']} returned at least once\n")
+            for label, n in sorted(st["by_status"].items(), key=lambda kv: -kv[1]):
+                print(f"  {style.state(label)} {n}")
+            for label, n in sorted(st["review"].items(), key=lambda kv: -kv[1]):
+                print(f"  {style.paint('review · ' + label, style.GRIS):<30} {n}")
             return 0
         if cmd == "chat":
             import threading

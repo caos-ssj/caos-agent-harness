@@ -178,11 +178,7 @@ export const App: React.FC = () => {
       data-accent={envSettings.accent}
       data-density={envSettings.density}
       className={`h-[100dvh] w-full overflow-hidden flex flex-col font-sans bg-caos-negro text-caos-hueso ${
-        envSettings.pattern === 'grid'
-          ? 'bg-pattern-grid'
-          : envSettings.pattern === 'vignette'
-          ? 'bg-pattern-vignette'
-          : ''
+        envSettings.pattern === 'vignette' ? 'bg-pattern-vignette' : ''
       }`}
     >
       {/* Cabecera Unificada Compacta */}
