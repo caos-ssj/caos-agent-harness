@@ -141,6 +141,19 @@ class Board:
             self.trace.event(f"task:{task_id}", "review", "verdict", "", verdict, note)
         return n == 1
 
+    def requeue(self, task_id: int, queue: str) -> bool:
+        """Moves a task that has not been sent to another queue. A task being sent, delivered or closed stays where it is:
+        the claim made when it was sent is never undone from here."""
+        with self.lock:
+            row = self.conn.execute("SELECT queue FROM tasks WHERE id=? AND status='pending'", (task_id,)).fetchone()
+            if not row or row["queue"] == queue:
+                return False
+            n = self.conn.execute("UPDATE tasks SET queue=? WHERE id=? AND status='pending'", (queue, task_id)).rowcount
+            if n and self.trace:
+                self.trace.event(f"task:{task_id}", "board", "requeue", queue, "pending", f"from:{row['queue']}")
+            self.conn.commit()
+        return n == 1
+
     def discard(self, task_id: int) -> bool:
         with self.lock:
             n = self.conn.execute("UPDATE tasks SET status='discarded' WHERE id=? AND status='pending'", (task_id,)).rowcount

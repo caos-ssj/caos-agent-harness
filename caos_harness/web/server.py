@@ -320,11 +320,12 @@ class Api:
         with b.lock:
             rows = b.conn.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 400").fetchall()
             decisions = dict(b.trace.db.execute("SELECT run_id, json_extract(data,'$.tier') || '|' || COALESCE(name,'') || '|' || status FROM events WHERE source='router'").fetchall()) if b.trace else {}
+            moved = {r[0] for r in b.trace.db.execute("SELECT DISTINCT run_id FROM events WHERE source='board' AND kind='requeue'").fetchall()} if b.trace else set()
         tasks = []
         for r in rows:
             t = task_row(r)
             d = decisions.get(f"task:{r['id']}")
-            if d:
+            if d and f"task:{r['id']}" not in moved:   # an operator's move overrides the router's choice: it must not claim the new queue
                 tier, system, action = d.split("|")
                 t["router"] = {"tier": tier, "system": system or None, "action": action}
             tasks.append(t)
@@ -382,6 +383,14 @@ class Api:
             "agents": [a.name for a in self.p.agents.values()],
             "stats": self.p.board.stats()
         }
+
+    def move(self, tid: int, body: dict) -> dict:
+        queue = body.get("queue")
+        if not isinstance(queue, str) or (queue != app.PERSON and queue not in self.p.agents):
+            raise app.ConfigError(f"unknown queue: {queue} (an agent from harness.toml, or {app.PERSON})")
+        if not self.p.board.requeue(tid, queue):
+            raise app.ConfigError("only a pending task that is not already there can be moved")
+        return {"id": tid, "queue": queue}
 
     def discard(self, tid: int) -> dict:
         if not self.p.board.discard(tid):
@@ -520,6 +529,9 @@ def make_handler(api: Api):
                 if m_del:
                     api.session_delete(m_del.group(1))
                     return self.send_json(200, {"deleted": True})
+                m_move = re.fullmatch(r"/api/task/(\d+)/move", path)
+                if m_move:
+                    return self.send_json(200, api.move(int(m_move.group(1)), body))
                 m = re.fullmatch(r"/api/task/(\d+)/(review|discard)", path)
                 if m:
                     tid = int(m.group(1))

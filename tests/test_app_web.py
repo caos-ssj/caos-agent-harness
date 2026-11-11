@@ -258,3 +258,27 @@ def test_state_says_when_the_project_holds_sample_data(project):
     assert api.state()["sample"] is False
     (project.root / ".harness" / "sample").write_text("sample")
     assert api.state()["sample"] is True
+
+
+def test_the_dashboard_moves_a_pending_task_to_a_known_queue_only(project):
+    api = Api(project)
+    tid = api.add({"text": "x", "queue": "upper"})["id"]
+    assert api.move(tid, {"queue": "person"}) == {"id": tid, "queue": "person"} and api.task(tid)["state"] == "person"
+    with pytest.raises(app.ConfigError, match="unknown queue"):
+        api.move(tid, {"queue": "nope"})
+    with pytest.raises(app.ConfigError, match="only a pending task"):
+        api.move(tid, {"queue": "person"})
+
+
+def test_a_moved_task_no_longer_claims_the_router_chose_its_queue(project):
+    api = Api(project)
+    tid = api.add({"text": "x", "tier": "low"})["id"]
+    first = next(t for t in api.state()["tasks"] if t["id"] == tid)
+    if "router" not in first:
+        pytest.skip("no measured system for this tier in this project")
+    api.move(tid, {"queue": "upper" if first["queue"] == "person" else "person"})
+    assert "router" not in next(t for t in api.state()["tasks"] if t["id"] == tid)
+    assert any(e["source"] == "router" for e in api.task(tid)["timeline"])      # the original decision stays in the trace
+    for bad in (["upper"], {"a": 1}, None, 5):
+        with pytest.raises(app.ConfigError, match="unknown queue"):
+            api.move(tid, {"queue": bad})

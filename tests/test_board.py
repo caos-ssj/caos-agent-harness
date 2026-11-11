@@ -127,3 +127,14 @@ def test_demo_is_deterministic_and_loses_nothing():
     assert a["routed_to_a_person"] + a["closed_ok"] + a["closed_bad_input"] + a["open_for_human_review"] == a["tasks"] == 25
     assert a["routed_to_a_person"] == 5 and "person" not in a["by_agent"]   # the critical tier never reaches an agent
     assert a["dispatch_errors_requeued"] == 1 and a["held_while_agent_busy"] > 0
+
+
+def test_a_pending_task_can_change_queue_but_a_claimed_one_cannot():
+    from caos_harness.traces.store import Trace
+    b = Board(trace=Trace(":memory:"))
+    t = b.add("check the retry policy", queue="a")
+    assert b.requeue(t, "b") and b.get(t)["queue"] == "b"
+    assert not b.requeue(t, "b")                                        # already there: nothing to do
+    assert ("requeue", "b", "from:a") in [(e["kind"], e["name"], e["reason"]) for e in b.trace.timeline(f"task:{t}")]
+    b.conn.execute("UPDATE tasks SET status='sending' WHERE id=?", (t,))
+    assert not b.requeue(t, "a") and b.get(t)["queue"] == "b"           # once sent, the claim stays
