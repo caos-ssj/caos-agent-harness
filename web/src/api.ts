@@ -66,12 +66,14 @@ export interface SkillInfo {
 
 export interface StateResponse {
   project: string
+  root?: string
   now: number
   agents: Agent[]
   tasks: Task[]
   stats: BoardStats
   quality?: Quality
   running: boolean
+  sample?: boolean
   last_run: Array<{ id: number; ok: boolean; reason: string }>
   skills: SkillInfo[]
   tiers: string[]
@@ -101,6 +103,26 @@ export interface RouterResponse {
   profiles: ModelProfile[]
 }
 
+export interface ModelDetail {
+  name: string
+  size: number | null
+  parameter_size: string | null
+  quantization: string | null
+  family: string | null
+}
+
+export interface Workspace {
+  name: string
+  path: string
+  current: boolean
+  ready: boolean
+}
+
+export interface WorkspacesResponse {
+  current: string
+  items: Workspace[]
+}
+
 export interface ProviderItem {
   id: string
   name: string
@@ -109,6 +131,7 @@ export interface ProviderItem {
   quota: string
   cost_per_m: string
   models: string[]
+  model_details?: ModelDetail[]
   default_model: string
   description: string
   is_fallback?: boolean
@@ -238,6 +261,13 @@ export const api = {
   getState: () => request<StateResponse>('/api/state'),
   getRouter: () => request<RouterResponse>('/api/router'),
   getProviders: () => request<ProvidersResponse>('/api/providers'),
+  getWorkspaces: () => request<WorkspacesResponse>('/api/workspaces'),
+  addWorkspace: (path: string, initialize = false) =>
+    request<WorkspacesResponse>('/api/workspaces', { method: 'POST', body: JSON.stringify({ path, initialize }) }),
+  switchWorkspace: (path: string) =>
+    request<WorkspacesResponse>('/api/workspaces/switch', { method: 'POST', body: JSON.stringify({ path }) }),
+  removeWorkspace: (path: string) =>
+    request<WorkspacesResponse>('/api/workspaces/remove', { method: 'POST', body: JSON.stringify({ path }) }),
   getRepositories: () => request<RepositoryItem[]>('/api/repositories'),
   getSessions: () => request<SessionItem[]>('/api/sessions'),
   getSession: (id: string) => request<SessionDetail>(`/api/sessions/${id}`),

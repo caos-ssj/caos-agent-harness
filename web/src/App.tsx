@@ -1,347 +1,113 @@
-import React, { useEffect, useState, useCallback } from 'react'
-import {
-  api,
-  StateResponse,
-  SessionItem,
-  SessionDetail,
-  RepositoryItem,
-  ProviderItem,
-} from './api'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api, ProviderItem, RouterResponse, StateResponse } from './api'
+import { View, isSpecialKey } from './lib'
+import { usePrefs } from './prefs'
 import { Header } from './components/Header'
-import { Sidebar } from './components/Sidebar'
-import { HackerConsole } from './components/HackerConsole'
-import { CommandBar } from './components/CommandBar'
 import { Board } from './components/Board'
+import { Console } from './components/Console'
 import { ProvidersView } from './components/ProvidersView'
 import { StatsView } from './components/StatsView'
 import { SkillsView } from './components/SkillsView'
-import { CommandPaletteModal } from './components/CommandPaletteModal'
-import { EnvironmentModal, EnvironmentSettings } from './components/EnvironmentModal'
-import { AlertCircle } from 'lucide-react'
+import { Palette, PaletteItem } from './components/Palette'
+import { Preferences } from './components/Preferences'
+import { PageHead } from './components/PageHead'
+
+const VIEW_FROM_URL: Record<string, View> = { board: 'board', desk: 'board', console: 'console', providers: 'providers', measured: 'measured', skills: 'skills' }
 
 export const App: React.FC = () => {
+  const query = useMemo(() => new URLSearchParams(window.location.search), [])
+  const [prefs, setPrefs, resetPrefs] = usePrefs()
+  const [view, setView] = useState<View>(() => VIEW_FROM_URL[query.get('tab') || ''] ?? prefs.start)
   const [state, setState] = useState<StateResponse | null>(null)
-  // Deep links: /?tab=board&task=12 opens the board with that task expanded.
-  const query = new URLSearchParams(window.location.search)
-  const tabFromUrl = ({ board: 'workstation', console: 'console', providers: 'providers', measured: 'stats', skills: 'skills' } as const)[query.get('tab') || ''] as
-    | 'console' | 'workstation' | 'providers' | 'stats' | 'skills' | undefined
-  const [activeTab, setActiveTab] = useState<'console' | 'workstation' | 'providers' | 'stats' | 'skills'>(tabFromUrl || 'console')
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(() => Number(query.get('task')) || null)
-  const [showCreateTask, setShowCreateTask] = useState(false)
-
-  // Sesiones de la Consola Hacker
-  const [sessions, setSessions] = useState<SessionItem[]>([])
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  const [currentSession, setCurrentSession] = useState<SessionDetail | null>(null)
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 767px)').matches)
-
-  // Repositorios y Proveedores
-  const [repositories, setRepositories] = useState<RepositoryItem[]>([])
-  const [activeRepo, setActiveRepo] = useState('')
   const [providers, setProviders] = useState<ProviderItem[]>([])
+  const [router, setRouter] = useState<RouterResponse | null>(null)
+  const [wsKey, setWsKey] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<number | null>(() => Number(query.get('task')) || null)
+  const [filter, setFilter] = useState<string | null>(null)
+  const [palette, setPalette] = useState(false)
+  const [prefsOpen, setPrefsOpen] = useState(false)
+  const [newTask, setNewTask] = useState(0)
+  const [consoleSignal, setConsoleSignal] = useState(0)
+  const running = useRef(false)
 
-  // Modal de Paleta de Comandos (Ctrl+K)
-  const [isPaletteOpen, setIsPaletteOpen] = useState(false)
-
-  // Configuración de Personalización de Entorno CAOS
-  const [isEnvModalOpen, setIsEnvModalOpen] = useState(false)
-  const [envSettings, setEnvSettings] = useState<EnvironmentSettings>(() => {
-    try {
-      const saved = localStorage.getItem('caos_env_settings')
-      if (saved) return JSON.parse(saved)
-    } catch (e) {}
-    return { accent: 'ambar', pattern: 'vignette', density: 'comfortable' }
-  })
-
-  const updateEnvSettings = (partial: Partial<EnvironmentSettings>) => {
-    setEnvSettings((prev) => {
-      const next = { ...prev, ...partial }
-      try {
-        localStorage.setItem('caos_env_settings', JSON.stringify(next))
-      } catch (e) {}
-      return next
-    })
-  }
-
-  const loadState = useCallback(async (quiet = false) => {
-    if (!quiet) setIsRefreshing(true)
-    setError(null)
-    try {
-      const data = await api.getState()
-      setState(data)
-    } catch (err: any) {
-      setError(err.message || 'Cannot reach the harness API on this machine. Is `caos-harness serve` still running?')
-    } finally {
-      if (!quiet) setIsRefreshing(false)
-    }
+  const load = useCallback(async () => {
+    try { const s = await api.getState(); running.current = s.running; setState(s); setError(null) }
+    catch (e: any) { setError(e.message || 'Cannot reach the harness on this machine. Is `caos-harness serve` still running?') }
   }, [])
-
-  const loadSessions = useCallback(async () => {
-    try {
-      const list = await api.getSessions()
-      setSessions(list)
-      if (list.length > 0 && !currentSessionId) {
-        setCurrentSessionId(list[0].id)
-      }
-    } catch (err) {
-      console.error('Could not load sessions:', err)
-    }
-  }, [currentSessionId])
-
-  const loadCurrentSession = useCallback(async (sid: string) => {
-    try {
-      const detail = await api.getSession(sid)
-      setCurrentSession(detail)
-    } catch (err) {
-      console.error('Could not load the session:', err)
-    }
-  }, [])
-
-  const loadProvidersAndRepos = useCallback(async () => {
-    try {
-      const [pRes, rRes] = await Promise.all([api.getProviders(), api.getRepositories()])
-      setProviders(pRes.providers)
-      setRepositories(rRes.filter((repo) => repo.current))
-      if (rRes.length > 0 && !activeRepo) {
-        setActiveRepo(rRes[0].name)
-      }
-    } catch (err) {
-      console.error(err)
-    }
-  }, [activeRepo])
-
-  // Carga inicial
+  const loadStatic = useCallback(() => { api.getProviders().then((r) => setProviders(r.providers)).catch(() => undefined); api.getRouter().then(setRouter).catch(() => undefined) }, [])
+  useEffect(() => { load(); loadStatic() }, [load, loadStatic])
+  const switched = useCallback(() => { setSelected(null); setFilter(null); setWsKey((n) => n + 1); load(); loadStatic() }, [load, loadStatic])
+  // Poll quickly while a run is going, slowly otherwise, and not at all while the tab is hidden.
   useEffect(() => {
-    loadState()
-    loadSessions()
-    loadProvidersAndRepos()
-  }, [loadState, loadSessions, loadProvidersAndRepos])
+    const t = window.setInterval(() => { if (!document.hidden) load() }, state?.running ? 1200 : 8000)
+    return () => window.clearInterval(t)
+  }, [load, state?.running])
 
-  // Cargar sesión cuando cambie el ID seleccionado
+  const tasks = state?.tasks ?? []
+  const needsYou = tasks.filter((t) => t.state === 'to_review' || t.state === 'verify' || t.state === 'person').length
+  // `run` only sends to agents: a task in the person queue is waiting for a human, not for a run.
+  const runnable = tasks.filter((t) => t.state === 'pending' && t.queue !== 'person').length
+
+  const run = useCallback(async () => {
+    if (running.current || runnable === 0) return
+    try { await api.runPending(); running.current = true; await load() } catch (e: any) { setError(e.message || 'The run did not start.') }
+  }, [load, runnable])
+  const go = useCallback((v: View) => { setView(v); setPrefsOpen(false) }, [])
+  const openNewTask = useCallback(() => { setView('board'); setNewTask((n) => n + 1) }, [])
+
   useEffect(() => {
-    if (currentSessionId) {
-      loadCurrentSession(currentSessionId)
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); return }
+      if (e.metaKey || e.ctrlKey || e.altKey || isSpecialKey(e) || palette) return
+      if (e.key === 'r') { e.preventDefault(); run() }
     }
-  }, [currentSessionId, loadCurrentSession])
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [run, palette])
 
-  // Atajo global Ctrl+K / ⌘K
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault()
-        setIsPaletteOpen((prev) => !prev)
-      }
-    }
-    window.addEventListener('keydown', handleGlobalKeyDown)
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
-  }, [])
-
-  const handleCreateSession = async () => {
-    try {
-      const created = await api.createSession({
-        project: activeRepo,
-        mode: 'plan',
-      })
-      await loadSessions()
-      setCurrentSessionId(created.id)
-    } catch (err) {
-      console.error('Could not create the session:', err)
-    }
-  }
-
-  const handleDeleteSession = async (sid: string) => {
-    try {
-      await api.deleteSession(sid)
-      await loadSessions()
-      if (currentSessionId === sid) {
-        setCurrentSessionId(null)
-        setCurrentSession(null)
-      }
-    } catch (err) {
-      console.error('Could not delete the session:', err)
-    }
-  }
-
-  const handleRunPending = async () => {
-    try {
-      await api.runPending()
-      loadState(true)
-    } catch (err) {
-      console.error(err)
-    }
-  }
+  const items: PaletteItem[] = [
+    { id: 'v-board', group: 'Go to', label: 'Board', hint: 'queues and tasks', run: () => go('board') },
+    { id: 'v-console', group: 'Go to', label: 'Console', hint: 'talk to a local model', run: () => { go('console'); setConsoleSignal((n) => n + 1) } },
+    { id: 'v-providers', group: 'Go to', label: 'Providers', hint: 'what can run here', run: () => go('providers') },
+    { id: 'v-measured', group: 'Go to', label: 'Measured', hint: 'figures and the router', run: () => go('measured') },
+    { id: 'v-skills', group: 'Go to', label: 'Skills', hint: 'instructions an agent reads first', run: () => go('skills') },
+    { id: 'a-new', group: 'Do', label: 'Add a task', hint: 'n', run: openNewTask },
+    { id: 'a-run', group: 'Do', label: runnable ? `Run ${runnable} pending` : 'Run pending tasks', hint: runnable ? 'r' : 'nothing to send', run },
+    ...(needsYou ? [{ id: 'a-needs', group: 'Do', label: `Show the ${needsYou} waiting for you`, hint: 'filter', run: () => { go('board'); setFilter('needs') } }] : []),
+    { id: 'p-density', group: 'Preferences', label: prefs.density === 'compact' ? 'Density: comfortable' : 'Density: compact', hint: 'how many tasks fit', run: () => setPrefs({ density: prefs.density === 'compact' ? 'comfortable' : 'compact' }) },
+    { id: 'p-text', group: 'Preferences', label: prefs.text === 'large' ? 'Text: standard size' : 'Text: large size', hint: 'easier to read', run: () => setPrefs({ text: prefs.text === 'large' ? 'standard' : 'large' }) },
+  ]
 
   return (
-    <div
-      data-accent={envSettings.accent}
-      data-density={envSettings.density}
-      className={`h-[100dvh] w-full overflow-hidden flex flex-col font-sans bg-caos-negro text-caos-hueso ${
-        envSettings.pattern === 'vignette' ? 'bg-pattern-vignette' : ''
-      }`}
-    >
-      {/* Cabecera Unificada Compacta */}
+    <div className="app" data-density={prefs.density} data-text={prefs.text}>
+      <a className="skip" href="#main">Skip to the content</a>
       <Header
-        state={state}
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onRunPending={handleRunPending}
-        isRefreshing={isRefreshing}
-        onRefresh={() => {
-          loadState()
-          loadSessions()
-        }}
-        onOpenPalette={() => setIsPaletteOpen(true)}
-        onOpenEnvironment={() => setIsEnvModalOpen(true)}
-        activeRepo={activeRepo}
+        project={state?.project ?? ''} root={state?.root} onSwitched={switched} sample={!!state?.sample} view={view} onView={go}
+        needsYou={needsYou} runnable={runnable} running={!!state?.running} onRun={run}
+        onOpenPalette={() => setPalette(true)} onTogglePrefs={() => setPrefsOpen((o) => !o)} prefsOpen={prefsOpen}
       />
-
-      {/* Espacio de Trabajo Principal (Llena el 100% de la ventana sin scroll externo) */}
-      <main className="flex-1 min-h-0 w-full overflow-hidden flex flex-col">
-        {error && (
-          <div className="shrink-0 p-3 border-b border-caos-redText bg-caos-redMuted text-caos-redText text-xs font-semibold flex items-center justify-between px-4">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-            <button
-              onClick={() => setError(null)}
-              className="text-xs uppercase font-mono hover:underline cursor-pointer"
-            >
-              Close
-            </button>
-          </div>
+      {state?.sample && <div className="sample-strip">Sample data: the tasks and answers here are made-up examples.</div>}
+      {prefsOpen && <Preferences prefs={prefs} onChange={setPrefs} onReset={resetPrefs} onClose={() => setPrefsOpen(false)} />}
+      {error && <div className="banner err" role="alert"><span>{error}</span><button type="button" className="btn btn-quiet btn-sm" onClick={() => load()}>Try again</button></div>}
+      <main className="main" id="main" tabIndex={-1}>
+        {view === 'board' && <div className="view" key={`board-${wsKey}`}><Board router={router} state={state} selectedId={selected} onSelect={setSelected} onChanged={load} onRun={run} runnable={runnable} filter={filter} onFilter={setFilter} newTaskSignal={newTask} /></div>}
+        {view === 'console' && <div className="view" key={`console-${wsKey}`}><Console agents={state?.agents ?? []} profiles={router?.profiles ?? []} tiers={router?.tiers ?? []} project={state?.project ?? ''} skills={state?.skills ?? []} providers={providers} onBoardChanged={load} focusSignal={consoleSignal} /></div>}
+        {view === 'providers' && (
+          <div className="view" key="providers"><div className="page"><div className="page-inner">
+            <PageHead title="Providers" art="models" lead="Where models come from, which of them were measured, and which agents run them. A key is never typed or stored here." />
+            <ProvidersView agents={state?.agents ?? []} profiles={router?.profiles ?? []} tiers={router?.tiers ?? []} onUseModel={(m) => { try { localStorage.setItem('caos_model', m) } catch { /* ignore */ } setConsoleSignal((n) => n + 1); setView('console') }} />
+          </div></div></div>
         )}
-
-        {/* Pestaña 1: Consola Hacker (Dominante) */}
-        {activeTab === 'console' && (
-          <div className="work-surface h-full w-full flex overflow-hidden relative">
-            <div className={`${isSidebarCollapsed ? 'shrink-0' : 'absolute inset-y-0 left-0 z-20 shadow-2xl md:static md:shadow-none'} h-full`}>
-            <Sidebar
-              isCollapsed={isSidebarCollapsed}
-              onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              sessions={sessions}
-              currentSessionId={currentSessionId}
-              onSelectSession={(sid) => setCurrentSessionId(sid)}
-              onCreateSession={handleCreateSession}
-              onDeleteSession={handleDeleteSession}
-              repositories={repositories}
-              activeRepo={activeRepo}
-              onSelectRepo={(repo) => setActiveRepo(repo)}
-            />
-            </div>
-
-            <HackerConsole
-              currentSession={currentSession}
-              providers={providers}
-              activeRepo={activeRepo}
-              onMessageSent={() => {
-                if (currentSessionId) loadCurrentSession(currentSessionId)
-                loadSessions()
-              }}
-              onOpenPalette={() => setIsPaletteOpen(true)}
-              onCreateSession={handleCreateSession}
-            />
-          </div>
-        )}
-
-        {/* Pestaña 2: Mesa de Encargos y Aprobaciones (Workstation) */}
-        {activeTab === 'workstation' && (
-          <div className="work-surface h-full w-full overflow-y-auto flex flex-col p-3 sm:p-4 max-w-[1700px] mx-auto">
-            <div className="board-toolbar">
-              <div>
-                <h1>Board</h1>
-                <p>Who holds what, what was delivered, and what is waiting for your verdict.</p>
-              </div>
-              <button type="button" className="board-create" aria-expanded={showCreateTask} aria-controls="new-task-form" onClick={() => setShowCreateTask(!showCreateTask)}>
-                {showCreateTask ? 'Close' : 'New task'}
-              </button>
-            </div>
-            <div id="new-task-form" className="shrink-0 mb-3" hidden={!showCreateTask}>
-              <CommandBar
-                agents={state?.agents || []}
-                skills={state?.skills || []}
-                tiers={state?.tiers || ['low', 'medium', 'high', 'critical']}
-                onTaskCreated={() => loadState()}
-              />
-            </div>
-
-            <div className="flex-1 min-h-[420px] overflow-hidden">
-              <Board
-                tasks={state?.tasks || []}
-                agents={state?.agents || []}
-                running={state?.running ?? false}
-                selectedTaskId={selectedTaskId}
-                onSelectTask={setSelectedTaskId}
-                onChanged={() => loadState(true)}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Pestaña 3: Proveedores, Modelos y Failover de Cuota */}
-        {activeTab === 'providers' && (
-          <div className="h-full w-full overflow-y-auto p-5 max-w-[1500px] mx-auto">
-            <ProvidersView />
-          </div>
-        )}
-
-        {/* Pestaña 4: Estadísticas y Costos */}
-        {activeTab === 'stats' && (
-          <div className="h-full w-full overflow-y-auto p-5 max-w-[1500px] mx-auto">
-            <StatsView state={state} />
-          </div>
-        )}
-
-        {/* Pestaña 5: Habilidades de Rol & MCP */}
-        {activeTab === 'skills' && (
-          <div className="h-full w-full overflow-y-auto p-5 max-w-[1500px] mx-auto">
-            <SkillsView
-              skills={state?.skills || []}
-              agents={state?.agents || []}
-            />
-          </div>
-        )}
+        {view === 'measured' && <div className="view" key="measured"><StatsView state={state} /></div>}
+        {view === 'skills' && <div className="view" key="skills"><SkillsView skills={state?.skills ?? []} agents={state?.agents ?? []} /></div>}
       </main>
-
-      {/* Paleta de Comandos Flotante (Ctrl+K) */}
-      <CommandPaletteModal
-        isOpen={isPaletteOpen}
-        onClose={() => setIsPaletteOpen(false)}
-        onSelectTab={setActiveTab}
-        onSelectRepo={(repo) => setActiveRepo(repo)}
-        repositories={repositories}
-        activeRepo={activeRepo}
-      />
-
-      {/* Modal de Personalización de Entorno CAOS */}
-      <EnvironmentModal
-        isOpen={isEnvModalOpen}
-        onClose={() => setIsEnvModalOpen(false)}
-        settings={envSettings}
-        onUpdateSettings={updateEnvSettings}
-      />
-
-      {/* Barra de Estado Inferior Firme: Firma CAOS 'BRAYNER JAIME · caos' */}
-      <footer className="h-7 shrink-0 border-t border-caos-borde bg-caos-tinta flex items-center justify-between gap-3 px-3 text-[11px] font-mono text-caos-tenue z-20 overflow-hidden">
-        <div className="flex items-center gap-2 shrink-0 whitespace-nowrap">
-          <span className="font-serif tracking-widest text-caos-hueso font-bold">
-            BRAYNER JAIME
-          </span>
-          <span className="text-caos-borde">·</span>
-          <span className="font-brand text-caos-champan text-sm leading-none">
-            caos
-          </span>
-          <span className="text-caos-borde">·</span>
-          <span className="text-caos-champan font-mono">{window.location.host}</span>
-        </div>
-        <div className="hidden sm:flex items-center gap-3 text-[11px] font-mono whitespace-nowrap">
-          <span>Runs on this machine · commands need your approval</span>
-          <span className="text-caos-borde">•</span>
-          <span>Ctrl/⌘ K for commands</span>
-        </div>
+      <footer className="foot">
+        <span className="brandline"><b>BRAYNER JAIME</b><span className="fk">caos</span><span className="long">{window.location.host}</span></span>
+        <span className="motto" lang="es" title="Order emerges from the rigor of evidence">El orden emerge del rigor de la evidencia</span>
+        <span><span className="long">Runs on this machine · commands need your approval · Ctrl/⌘ K for commands</span><span className="short">this machine only</span></span>
       </footer>
+      <Palette open={palette} onClose={() => setPalette(false)} items={items} tasks={tasks} onTask={(id) => { setView('board'); setFilter(null); setSelected(id) }} />
     </div>
   )
 }
