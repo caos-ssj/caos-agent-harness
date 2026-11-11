@@ -15,10 +15,11 @@ from .metrics import confusion, ece, percentile, risk_coverage, wilson
 from .pipeline import process
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+PKG = ROOT / "caos_harness"
 
 
 def load(path="golden_v2.jsonl"):
-    return [json.loads(l) for l in (ROOT / "data" / path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    return [json.loads(l) for l in (PKG / "data" / path).read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 def evaluate_client(call, rows, client=None) -> dict:

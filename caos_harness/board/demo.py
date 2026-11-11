@@ -21,6 +21,7 @@ from ..traces.store import Trace, record_outcome
 from .core import Board
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+PKG = ROOT / "caos_harness"
 
 
 class Worker:
@@ -49,7 +50,7 @@ class LocalDispatcher:
 
 
 def run(seed: int = 7, trace: Trace | None = None) -> dict:
-    golden = [json.loads(l) for l in (ROOT / "data" / "golden.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    golden = [json.loads(l) for l in (PKG / "data" / "golden.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     records = {r["id"]: r for r in golden}
     workers = {"agent-a": Worker("agent-a", FlakyClient(seed=seed)),
                "agent-b": Worker("agent-b", FlakyClient(seed=seed, p_timeout=0.25, p_rate_limit=0.15, p_drift=0.1))}

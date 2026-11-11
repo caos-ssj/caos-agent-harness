@@ -36,7 +36,7 @@ flowchart LR
 |---|---|---|
 | `caos_harness/board` | Task board: one queue per agent, atomic claim before sending, dispatch only to idle agents, a failed dispatch returns to the queue, and no task closes without a review verdict (`ok`, `redo`, `verify`, `superseded`) | `make demo`, `make test` |
 | `caos_harness/memory` | One connection to a knowledge base behind an MCP server (search with a relevance score, read one note), and an in-memory stand-in for tests | `make test`, `make calibrate` |
-| `skills/` + `caos_harness/skills.py` | Role skills (`coder`, `qa`, `writer`, `model-selection` and others): a task queued with a skill is sent with the pointer to it first. Your own skills load from `.harness/skills/` or `CAOS_HARNESS_SKILLS` and never enter the repository | `python -m caos_harness skills` |
+| `caos_harness/skills/` + `caos_harness/skills.py` | Role skills (`coder`, `qa`, `writer`, `model-selection` and others): a task queued with a skill is sent with the pointer to it first. Your own skills load from `.harness/skills/` or `CAOS_HARNESS_SKILLS` and never enter the repository | `python -m caos_harness skills` |
 | `caos_harness/app.py` | A project is a folder with `harness.toml`; an agent is any command that reads the task on stdin. `caos-harness init`, `task add` (a queue, or a cost-of-error tier and the router decides), `run`, `review`, `status` | `caos-harness --help` |
 | `caos_harness/web` + `web/` | Local dashboard (React + TypeScript, served by the standard library on 127.0.0.1): board, review desk, router table, figures read from the reports. Writes need a header a foreign page cannot send; keys are never stored | `caos-harness serve` |
 | `caos_harness/engines/workstation.py` | Console for a local Ollama model. Shell commands are **off by default** and are switched on per session; then the model may propose a command, and it runs only after the operator approves it. Not a sandbox: see [docs/WORKSTATION.md](docs/WORKSTATION.md) | `caos-harness chat` |
@@ -114,7 +114,7 @@ The engine does not change the result: LangGraph and the second native run agree
 | high | 0.90 | `qwen2.5:7b` + rules, at 2.2 times the compute of the medium tier |
 | critical | 0.95 | human review: no measured system qualifies |
 
-The tiers are configuration ([`router.json`](router.json)). Precision and coverage reproduced the 2026-11-04 run exactly.
+The tiers are configuration ([`router.json`](caos_harness/router.json)). Precision and coverage reproduced the 2026-11-04 run exactly.
 
 Raw results: [`reports/`](reports/).
 
@@ -140,9 +140,10 @@ The agent eval also needs [Ollama](https://ollama.com) and a checkout of caos-ce
 
 Scope: synthetic data, local models on CPU, one MCP server; intervals are Wilson at 95 %.
 
-Use it on your own work:
+Install it and use it on your own work (step by step: [docs/QUICKSTART.md](docs/QUICKSTART.md)):
 
 ```bash
+pip install git+https://gitlab.com/braynerssj26/caos-agent-harness.git
 caos-harness init                                   # writes harness.toml: agents are commands
 caos-harness task add "summarise the release notes" --queue echo --skill qa
 caos-harness task add "approve the refund" --tier critical    # no measured system qualifies: it goes to a person

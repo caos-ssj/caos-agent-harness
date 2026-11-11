@@ -86,7 +86,7 @@ def build(seed: int = 11) -> list[dict]:
 
 def main():
     rows = build()
-    out = ROOT / "data" / "golden_v2.jsonl"
+    out = ROOT / "caos_harness" / "data" / "golden_v2.jsonl"
     out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
     from collections import Counter
     print(len(rows), "casos →", out.name, dict(Counter(r["kind"] for r in rows)), dict(Counter(r["split"] for r in rows)))

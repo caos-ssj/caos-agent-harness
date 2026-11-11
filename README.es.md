@@ -14,7 +14,7 @@ English: [README.md](README.md) · Diseño: [docs/ARCHITECTURE.md](docs/ARCHITEC
 | `caos_harness/board` | Tablero: una cola por agente, reclamación atómica antes de enviar, solo a agentes en espera, un envío fallido vuelve a la cola y ningún encargo se cierra sin veredicto de revisión | `make demo`, `make test` |
 | `caos_harness/router` | Elige el sistema medido más barato cuyo **límite inferior** de precisión cumple lo que exige el coste del error; si ninguno cumple, el encargo va a una persona | `make route` |
 | `caos_harness/memory` | Una sola conexión a la base de conocimiento por MCP (búsqueda con relevancia, lectura de una nota) | `make calibrate` |
-| `skills/` | Skills de rol (`coder`, `qa`, `writer`, `model-selection`): el encargo se envía con el puntero a su skill delante | `python -m caos_harness skills` |
+| `caos_harness/skills/` | Skills de rol (`coder`, `qa`, `writer`, `model-selection`): el encargo se envía con el puntero a su skill delante | `python -m caos_harness skills` |
 | `caos_harness/policy` | Lista blanca de herramientas, guarda de rutas, argumentos validados y presupuestos de pasos, llamadas y tiempo | `make test` |
 | `caos_harness/engines` | El bucle del agente en dos motores con la misma interfaz, uno propio y otro en **LangGraph**, con la misma política y las mismas verificaciones | `make test` |
 | `caos_harness/agent_eval` | Ejecuta el agente contra un servidor MCP real y lo compara con la recuperación directa sin modelo | `make agent-eval` |

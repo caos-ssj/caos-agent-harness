@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import runpy
 import sys
+from pathlib import Path
 
 COMMANDS = {
     "demo": ("caos_harness.board.demo", "board end to end: router, two simulated agents, validation, review (no model needed)"),
@@ -180,6 +181,10 @@ def main(argv: list[str]) -> int:
         return work(cmd, rest)
     if cmd not in COMMANDS:
         print(f"unknown command: {cmd}\n\n{usage()}", file=sys.stderr)
+        return 2
+    if cmd in ("regress", "mutation", "benchmark", "agent-eval", "calibrate") and not (Path(__file__).resolve().parent.parent / "reports").is_dir():
+        print(f"`{cmd}` writes reports and runs the repository's tests, so it needs a source checkout:\n"
+              "  git clone https://gitlab.com/braynerssj26/caos-agent-harness && cd caos-agent-harness && make check", file=sys.stderr)
         return 2
     sys.argv = [COMMANDS[cmd][0], *rest]
     try:

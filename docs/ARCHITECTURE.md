@@ -36,7 +36,7 @@ sequenceDiagram
 |---|---|---|
 | `router` | `choose(profiles, min_precision_lo) -> Decision`. Profiles come from benchmark reports; tiers from `router.json` | Picking a model by name or habit; using a model for a task it is not good enough for |
 | `board` | `add`, `assign(task, agent, dispatcher)`, `deliver`, `review`. `Dispatcher` is a two-method protocol (`is_idle`, `send`) | Double sends, tasks sent to a busy agent, tasks lost on a failed send, work closed by whoever did it |
-| `skills` | `skills/<name>/SKILL.md` with `name` and `description`; the board sends the pointer before the task | Each agent starting from different rules |
+| `skills` | `caos_harness/skills/<name>/SKILL.md` with `name` and `description`; the board sends the pointer before the task | Each agent starting from different rules |
 | `engines` | `run_agent(question, session, llm, tools, policy) -> Result`, implemented twice: plain loop and LangGraph | Lock-in to one orchestrator; logic hidden inside a framework |
 | `policy` | `Policy.check(tool, args)` raises `Blocked`; budgets for steps, tool calls and wall time | Tool misuse, path traversal, runaway loops |
 | `memory` | `KnowledgeBase.connect()` yields an MCP session; `search` returns rows with a relevance score | Each script opening the knowledge base its own way |
@@ -57,7 +57,7 @@ sequenceDiagram
 - **A real agent behind the board:** implement `Dispatcher.send` (a terminal pane, an HTTP call, a queue) and `is_idle`.
 - **Another model provider:** an object with `chat(messages, tools) -> message` for the engines, or `call(text) -> {"label", "confidence"}` for the validation pipeline.
 - **Another knowledge base:** any MCP server with a search tool that returns a path and a relevance score; set its location in `KnowledgeBase`.
-- **Another kind of task:** a golden set under `data/`, a benchmark run, and the router has profiles for it.
+- **Another kind of task:** a golden set under `caos_harness/data/`, a benchmark run, and the router has profiles for it.
 
 ## What is measured, and on what
 Synthetic data, local models on one CPU, one MCP server. Agent results vary between runs of the same configuration (17/20 and 16/20 in two runs), so comparisons are made across repeated runs.

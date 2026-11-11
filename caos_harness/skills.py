@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 FRONT = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.S)
 
 

@@ -8,7 +8,7 @@ from caos_harness import app
 from caos_harness.web.server import Api
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = [p for pat in ("caos_harness/**/*.py", "web/src/**/*.ts*", "skills/**/*.md", "docs/*.md", "README*.md", "tools/*.py", "*.toml", "Makefile")
+SOURCES = [p for pat in ("caos_harness/**/*.py", "web/src/**/*.ts*", "caos_harness/skills/**/*.md", "docs/*.md", "README*.md", "tools/*.py", "*.toml", "Makefile")
            for p in ROOT.glob(pat) if "dist" not in p.parts]
 PRIVATE = re.compile(r"/home/(?!usuario\b)\w+|Proyecto_caos|B[oó]veda|claude-stack|go-boveda|teo-redactor|qa-sentinel|caosssj")
 PRICE = re.compile(r"\$\s?\d+[.,]\d{2}")

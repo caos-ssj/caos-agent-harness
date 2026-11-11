@@ -24,7 +24,7 @@ caos-harness = "caos_harness.__main__:cli"
 include = ["caos_harness*"]
 
 [tool.setuptools.package-data]
-caos_harness = ["web/dist/**", "router.json", "thresholds.json"]
+caos_harness = ["web/dist/**", "router.json", "measured/*.json", "thresholds.json", "data/*.jsonl", "skills/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

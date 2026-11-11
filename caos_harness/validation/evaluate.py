@@ -15,15 +15,16 @@ from .pipeline import MAX_RETRIES, process
 from .sut import FlakyClient
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+PKG = ROOT / "caos_harness"
 
 
 def load_golden(path: Path | None = None) -> list[dict]:
-    path = path or ROOT / "data" / "golden.jsonl"
+    path = path or PKG / "data" / "golden.jsonl"
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 def run(seed: int = 7, thresholds: dict | None = None, backend: str = "sim") -> dict:
-    thresholds = thresholds or json.loads((ROOT / "thresholds.json").read_text())
+    thresholds = thresholds or json.loads((PKG / "thresholds.json").read_text())
     golden = load_golden()
 
     if backend in ("ollama", "hybrid"):

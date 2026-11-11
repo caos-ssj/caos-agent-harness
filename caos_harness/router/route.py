@@ -50,7 +50,7 @@ class Decision:
 
 def load_profiles(reports: Path | None = None, split: str = "all") -> list[Profile]:
     """Latest measurement of each system on the given split."""
-    reports = reports or ROOT / "reports" / "validation"
+    reports = reports or (ROOT / "reports" / "validation" if (ROOT / "reports" / "validation").is_dir() else ROOT / "caos_harness" / "measured")
     latest: dict[str, Profile] = {}
     for f in sorted(reports.glob("benchmark-*.json")):
         m = DATE_RE.search(f.name)
@@ -69,7 +69,7 @@ def load_profiles(reports: Path | None = None, split: str = "all") -> list[Profi
 
 
 def load_tiers(path: Path | None = None) -> dict[str, float]:
-    data = json.loads((path or ROOT / "router.json").read_text(encoding="utf-8"))
+    data = json.loads((path or ROOT / "caos_harness" / "router.json").read_text(encoding="utf-8"))
     return {k: float(v) for k, v in data.items() if not k.startswith("_")}
 
 

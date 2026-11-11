@@ -1,0 +1,348 @@
+{
+  "qwen2.5:7b|test": {
+    "n": 25,
+    "n_answerable": 23,
+    "answered": 22,
+    "coverage": 0.957,
+    "precision": 1.0,
+    "precision_ci95": [
+      0.851,
+      1.0
+    ],
+    "coverage_ci95": [
+      0.79,
+      0.992
+    ],
+    "escalated": 1,
+    "rejects_caught": "2/2",
+    "ece": 0.105,
+    "risk_coverage": [
+      {
+        "coverage": 0.18,
+        "precision": 1.0,
+        "min_conf": 1.0
+      },
+      {
+        "coverage": 0.41,
+        "precision": 1.0,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.59,
+        "precision": 1.0,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.82,
+        "precision": 1.0,
+        "min_conf": 0.8
+      },
+      {
+        "coverage": 1.0,
+        "precision": 1.0,
+        "min_conf": 0.8
+      }
+    ],
+    "confusion": {
+      "access": {
+        "access": 8
+      },
+      "billing": {
+        "billing": 5
+      },
+      "bug": {
+        "bug": 3
+      },
+      "other": {
+        "other": 6
+      }
+    },
+    "by_kind": {
+      "adversarial": {
+        "n": 2,
+        "correct": 2
+      },
+      "ambiguous": {
+        "n": 1,
+        "correct": 1
+      },
+      "template-en": {
+        "n": 7,
+        "correct": 7
+      },
+      "template-es": {
+        "n": 12,
+        "correct": 12
+      }
+    },
+    "wrong": [],
+    "latency_p50_s": 2.942,
+    "latency_p95_s": 3.827
+  },
+  "qwen2.5:7b+rules|test": {
+    "n": 25,
+    "n_answerable": 23,
+    "answered": 22,
+    "coverage": 0.957,
+    "precision": 1.0,
+    "precision_ci95": [
+      0.851,
+      1.0
+    ],
+    "coverage_ci95": [
+      0.79,
+      0.992
+    ],
+    "escalated": 1,
+    "rejects_caught": "2/2",
+    "ece": 0.105,
+    "risk_coverage": [
+      {
+        "coverage": 0.18,
+        "precision": 1.0,
+        "min_conf": 1.0
+      },
+      {
+        "coverage": 0.41,
+        "precision": 1.0,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.59,
+        "precision": 1.0,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.82,
+        "precision": 1.0,
+        "min_conf": 0.8
+      },
+      {
+        "coverage": 1.0,
+        "precision": 1.0,
+        "min_conf": 0.8
+      }
+    ],
+    "confusion": {
+      "access": {
+        "access": 8
+      },
+      "billing": {
+        "billing": 5
+      },
+      "bug": {
+        "bug": 3
+      },
+      "other": {
+        "other": 6
+      }
+    },
+    "by_kind": {
+      "adversarial": {
+        "n": 2,
+        "correct": 2
+      },
+      "ambiguous": {
+        "n": 1,
+        "correct": 1
+      },
+      "template-en": {
+        "n": 7,
+        "correct": 7
+      },
+      "template-es": {
+        "n": 12,
+        "correct": 12
+      }
+    },
+    "wrong": [],
+    "latency_p50_s": 3.008,
+    "latency_p95_s": 3.427
+  },
+  "qwen2.5:7b|all": {
+    "n": 74,
+    "n_answerable": 66,
+    "answered": 62,
+    "coverage": 0.939,
+    "precision": 0.968,
+    "precision_ci95": [
+      0.89,
+      0.991
+    ],
+    "coverage_ci95": [
+      0.854,
+      0.976
+    ],
+    "escalated": 4,
+    "rejects_caught": "8/8",
+    "ece": 0.085,
+    "risk_coverage": [
+      {
+        "coverage": 0.19,
+        "precision": 1.0,
+        "min_conf": 1.0
+      },
+      {
+        "coverage": 0.4,
+        "precision": 1.0,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.6,
+        "precision": 0.973,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.81,
+        "precision": 0.98,
+        "min_conf": 0.8
+      },
+      {
+        "coverage": 1.0,
+        "precision": 0.968,
+        "min_conf": 0.7
+      }
+    ],
+    "confusion": {
+      "access": {
+        "access": 16
+      },
+      "billing": {
+        "billing": 15,
+        "bug": 1
+      },
+      "bug": {
+        "bug": 16
+      },
+      "other": {
+        "other": 13,
+        "billing": 1
+      }
+    },
+    "by_kind": {
+      "adversarial": {
+        "n": 10,
+        "correct": 10
+      },
+      "ambiguous": {
+        "n": 4,
+        "correct": 3
+      },
+      "template-en": {
+        "n": 24,
+        "correct": 24
+      },
+      "template-es": {
+        "n": 24,
+        "correct": 23
+      }
+    },
+    "wrong": [
+      {
+        "id": "g040",
+        "text": "¿Tienen descuentos para estudiantes?",
+        "truth": "other",
+        "pred": "billing",
+        "conf": 0.9
+      },
+      {
+        "id": "g071",
+        "text": "Mi pago falló y además la app muestra un error",
+        "truth": "billing",
+        "pred": "bug",
+        "conf": 0.7
+      }
+    ],
+    "latency_p50_s": 2.895,
+    "latency_p95_s": 3.517
+  },
+  "qwen2.5:7b+rules|all": {
+    "n": 74,
+    "n_answerable": 66,
+    "answered": 59,
+    "coverage": 0.894,
+    "precision": 0.983,
+    "precision_ci95": [
+      0.91,
+      0.997
+    ],
+    "coverage_ci95": [
+      0.797,
+      0.948
+    ],
+    "escalated": 7,
+    "rejects_caught": "8/8",
+    "ece": 0.073,
+    "risk_coverage": [
+      {
+        "coverage": 0.2,
+        "precision": 1.0,
+        "min_conf": 1.0
+      },
+      {
+        "coverage": 0.41,
+        "precision": 1.0,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.59,
+        "precision": 0.971,
+        "min_conf": 0.9
+      },
+      {
+        "coverage": 0.8,
+        "precision": 0.979,
+        "min_conf": 0.8
+      },
+      {
+        "coverage": 1.0,
+        "precision": 0.983,
+        "min_conf": 0.8
+      }
+    ],
+    "confusion": {
+      "access": {
+        "access": 15
+      },
+      "billing": {
+        "billing": 15
+      },
+      "bug": {
+        "bug": 15
+      },
+      "other": {
+        "other": 13,
+        "billing": 1
+      }
+    },
+    "by_kind": {
+      "adversarial": {
+        "n": 9,
+        "correct": 9
+      },
+      "ambiguous": {
+        "n": 2,
+        "correct": 2
+      },
+      "template-en": {
+        "n": 24,
+        "correct": 24
+      },
+      "template-es": {
+        "n": 24,
+        "correct": 23
+      }
+    },
+    "wrong": [
+      {
+        "id": "g040",
+        "text": "¿Tienen descuentos para estudiantes?",
+        "truth": "other",
+        "pred": "billing",
+        "conf": 0.9
+      }
+    ],
+    "latency_p50_s": 2.919,
+    "latency_p95_s": 3.501
+  }
+}
