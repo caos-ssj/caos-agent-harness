@@ -56,4 +56,8 @@ make mutation            # injects 26 faults and counts how many the tests catch
 
 ## The dashboard in two minutes
 
-`caos-harness serve`, then open http://127.0.0.1:8791. A new project shows a "Start here" guide on the desk: add a task, run it, review what came back. Each step is checked off by what the board holds, not by what you clicked. Press `⌘K` to jump anywhere, `n` to write a task, `j` / `k` to move through them. To look around without any model, build the sample project (`python3 tools/seed_demo.py /tmp/harness-demo`) and serve that folder: the page says "Sample data" on every screen.
+`caos-harness serve`, then open http://127.0.0.1:8791. A new project shows a "Start here" guide on the Board: add a task, run it, review what came back. Each step is checked off by what the board holds, not by what you clicked. Press `⌘K` to jump anywhere, `n` to write a task, `j` / `k` to move through them. To look around without any model, build the sample project (`python3 tools/seed_demo.py /tmp/harness-demo`) and serve that folder: the page says "Sample data" on every screen.
+
+## The terminal session
+
+`cd <your project> && caos-harness` opens the interactive session (needs a `harness.toml`; `caos-harness init` writes one). `/help` lists the commands; `/serve` starts the dashboard without leaving.

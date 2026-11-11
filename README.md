@@ -38,7 +38,7 @@ flowchart LR
 | `caos_harness/memory` | One connection to a knowledge base behind an MCP server (search with a relevance score, read one note), and an in-memory stand-in for tests | `make test`, `make calibrate` |
 | `caos_harness/skills/` + `caos_harness/skills.py` | Role skills (`coder`, `qa`, `writer`, `model-selection` and others): a task queued with a skill is sent with the pointer to it first. Your own skills load from `.harness/skills/` or `CAOS_HARNESS_SKILLS` and never enter the repository | `python -m caos_harness skills` |
 | `caos_harness/app.py` | A project is a folder with `harness.toml`; an agent is any command that reads the task on stdin. `caos-harness init`, `task add` (a queue, or a cost-of-error tier and the router decides), `run`, `review`, `status` | `caos-harness --help` |
-| `caos_harness/web` + `web/` | Local dashboard (React + TypeScript, served by the standard library on 127.0.0.1): board, review desk, router table, figures read from the reports. Writes need a header a foreign page cannot send; keys are never stored | `caos-harness serve` |
+| `caos_harness/web` + `web/` | Local dashboard (React + TypeScript, served by the standard library on 127.0.0.1): five views (Console, Board, Providers, Measured, Skills), figures read from the reports. Writes need a header a foreign page cannot send; keys are never stored | `caos-harness serve` |
 | `caos_harness/engines/workstation.py` | Console for a local Ollama model. Shell commands are **off by default** and are switched on per session; then the model may propose a command, and it runs only after the operator approves it. Not a sandbox: see [docs/WORKSTATION.md](docs/WORKSTATION.md) | `caos-harness chat` |
 | `caos_harness/policy` | Tool allow-list, path guard (blocks `..`, absolute paths and `~`), validated arguments, step, tool-call and wall-time budgets | `make test` |
 | `caos_harness/engines` | The agent loop on two engines with one interface, a plain Python loop (`native.py`) and a **LangGraph** state graph (`langgraph_engine.py`), sharing the same policy and checks: a model failure does not crash the run; a citation must come from what a tool returned; a low-relevance citation becomes an abstention | `make test` |
@@ -152,20 +152,32 @@ caos-harness review 1 redo "no evidence of the run"           # back to its agen
 caos-harness serve                                  # the same board in the browser
 ```
 
-### The desk
+### The dashboard
 
-`caos-harness serve` opens one working screen, not a set of tabs: queues on the left, the tasks in the middle ordered by what needs you first, and the selected task's whole life on the right (what was asked, who got it and why, what came back, the trace) with the verdict controls under it. A line of figures sits above; each one names the command that produced it. **Console** (a local Ollama model) and **Library** (measured systems, the router, agents, skills, providers) are the other two views.
+`caos-harness serve` opens the local dashboard (this machine only) with five views: **Console** (a local Ollama model), **Board**, **Providers**, **Measured** and **Skills**.
 
-![The desk on a new project: a guide that checks itself off as the board fills](docs/first-run.png)
+![The board: queues, tasks by what needs you, and a task open with its trace](docs/board.png)
 
-- **Keys:** `j` / `k` move through tasks, `n` writes a task, `r` runs what is pending, `⌘K` / `Ctrl+K` goes anywhere or finds a task by number or words, `Esc` closes.
-- **Preferences** are two and both are useful: density (comfortable or compact) and the view the page opens on. They are stored in your browser only.
-- **Sample data:** `python3 tools/seed_demo.py /tmp/harness-demo` builds a project of made-up tasks and canned answers; the page labels it "Sample data" so nobody mistakes it for a record.
+- **Board:** four queue cards (who holds what, with a dot per open task: amber when it needs you), then the tasks grouped *Needs you*, *In motion* and *Closed*. A row opens in place with what was asked, who got it and why, what came back, the trace and the verdict buttons. A new project starts with a three-step guide that checks itself off by what the board holds.
+- **Workspaces:** the folder chip at the top switches between project folders you listed (each keeps its own board, traces and sessions in its `.harness/`). Adding a folder checks it is a real directory with a valid `harness.toml`, or creates one if you ask. The list is kept in `~/.config/caos-harness/workspaces.json`; the browser can only switch to a folder on that list, never while something is running, and shell commands start off again.
+- **Models:** the Console's model picker shows each installed Ollama model with its size, whether it was measured, how well (precision and its lower bound), which cost of error it clears and which agents run it. **Providers** is the same information as a table, one row per installed model; the other providers only say whether their key is in the environment.
+- **Measured:** four tiles (waiting for you, tasks, reviewed, faults caught), each with a bar that shows its parts and the command that produced it, then a chart of reliability against time with one point per measured system (shape for the model family, filled when it runs behind the rules) against the line each cost of error asks for, and the same data with its intervals.
+- **Keys:** `⌘K` / `Ctrl+K` goes anywhere or finds a task by number or words, `j` / `k` move through tasks, `n` writes one, `r` runs what is pending.
+- **Preferences:** density, text size (standard or large) and the view the page opens on. Stored in your browser only.
+- **Sample data:** `python3 tools/seed_demo.py /tmp/harness-demo` builds a project of made-up tasks and canned answers; the page labels it "Sample data".
 - Every figure comes from the board (`Board.stats()`), the task list, or a report a command wrote. There are no estimates.
 
-The CLI speaks in the same words, with colour only on a real terminal (never when piped, and never when `NO_COLOR` is set):
+| | |
+|---|---|
+| ![Measured: reliability against time, one shape per model family](docs/measured-chart.png) | ![Providers: every installed model and what is known about it](docs/providers-models.png) |
+| ![Choosing a model](docs/models.png) | ![Switching workspace](docs/workspaces.png) |
+| ![Console](docs/console.png) | ![Skills](docs/skills.png) |
 
-![caos-harness, task list and status in a terminal](docs/cli.png)
+### The terminal
+
+`caos-harness` on a terminal opens an interactive session: a banner with the project's queues and skills, what waits for you, and a prompt with a status line above it. Commands start with `/` (`/task`, `/run`, `/review`, `/status`, `/skills`, `/serve`, `/help`, `/quit`); Tab completes them, ↑ recalls history, Ctrl-D leaves. Plain text is offered as a new task. Scripts keep the same commands without the slash (`caos-harness status`, `task list`, `run`), and `caos-harness repl` reads commands from a pipe. Colour only on a real terminal, never when piped, never with `NO_COLOR`.
+
+![The session](docs/repl.png)
 
 Every command is also available as `python -m caos_harness <command>` (`demo`, `route`, `eval`, `regress`, `mutation`, `benchmark`, `agent-eval`, `calibrate`, `skills`, `trace`). Design notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Español: [README.es.md](README.es.md).
 

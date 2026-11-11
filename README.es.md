@@ -60,14 +60,18 @@ make check        # 137 pruebas, umbrales, compuerta de regresión, demo del tab
 make mutation     # 26/26 fallos inyectados detectados
 python -m caos_harness            # todos los comandos
 ```
-### La mesa
+### El panel
 
-`caos-harness serve` abre una sola pantalla de trabajo: las colas a la izquierda, los encargos en el centro (primero lo que te espera) y, a la derecha, la vida completa del encargo elegido: qué se pidió, quién lo recibió y por qué, qué volvió y su traza, con el veredicto debajo. Arriba, una línea de cifras; cada una nombra el comando que la produjo. **Console** (modelo local con Ollama) y **Library** (sistemas medidos, router, agentes, skills, proveedores) son las otras dos vistas. La interfaz está en inglés.
+`caos-harness serve` abre el panel local (solo esta máquina) con cinco vistas: **Console** (modelo local con Ollama), **Board**, **Providers**, **Measured** y **Skills**. La interfaz está en inglés.
 
-- **Teclas:** `j` / `k` recorren los encargos, `n` escribe uno, `r` ejecuta lo pendiente, `⌘K` / `Ctrl+K` va a cualquier sitio o busca un encargo por número o palabras.
-- **Preferencias:** solo dos, y las dos sirven: densidad (cómoda o compacta) y la vista con la que abre. Se guardan en tu navegador.
-- **Datos de ejemplo:** `python3 tools/seed_demo.py /tmp/harness-demo` crea un proyecto de encargos inventados; la página lo rotula «Sample data».
-- La CLI usa las mismas palabras, con color solo en una terminal real (nunca por tubería ni con `NO_COLOR`).
+- **Board:** cuatro tarjetas de colas (quién tiene qué, con un punto por encargo abierto: ámbar si te espera) y los encargos agrupados en *Needs you*, *In motion* y *Closed*. Una fila se abre en su sitio con lo pedido, quién lo recibió y por qué, lo que volvió, la traza y los botones de veredicto. Un proyecto nuevo empieza con una guía de tres pasos que se marca sola según lo que hay en el tablero.
+- **Measured:** cuatro fichas con barras que muestran sus partes y el comando que las produjo, y el intervalo de precisión de cada sistema frente a la línea que pide cada costo de error.
+- **Teclas:** `⌘K` / `Ctrl+K`, `j` / `k`, `n`, `r`. **Preferencias:** densidad, tamaño de texto y vista inicial, guardadas en tu navegador.
+- **Datos de ejemplo:** `python3 tools/seed_demo.py /tmp/harness-demo`; la página los rotula «Sample data».
+
+### La terminal
+
+`caos-harness` en una terminal abre una sesión interactiva: banner con colas y skills, lo que te espera y un prompt con línea de estado. Los comandos empiezan con `/` (`/task`, `/run`, `/review`, `/status`, `/skills`, `/serve`, `/help`, `/quit`), Tab completa, ↑ recupera el historial. Para scripts siguen los mismos comandos sin barra. Color solo en terminal real (nunca por tubería ni con `NO_COLOR`).
 
 La evaluación del agente necesita [Ollama](https://ollama.com) y una copia de caos-cerebro: `make agent-eval MODEL=qwen2.5:7b ENGINE=langgraph CEREBRO=/ruta/a/caos-cerebro`.
 

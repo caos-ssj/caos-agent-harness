@@ -2,7 +2,7 @@
 
 Runs the command in a pty (so colour is on, exactly as in a terminal), turns the ANSI colours into HTML and
 takes a screenshot of it. Needs playwright. Example:
-    python3 tools/cli_shot.py /tmp/harness-demo docs/cli.png "caos-harness" "caos-harness task list" "caos-harness status"
+    python3 tools/cli_shot.py /tmp/harness-demo docs/cli.png "caos-harness task list" "caos-harness status"
 """
 import html
 import os

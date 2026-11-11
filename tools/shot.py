@@ -31,16 +31,25 @@ with sync_playwright() as p:
         pg.screenshot(path=str(out / name))
         print("wrote", out / name)
 
-    pg = page(); pg.goto(f"{demo}/?tab=desk&task=6"); shot(pg, "board.png")
+    pg = page(); pg.goto(f"{demo}/?tab=board&task=6"); shot(pg, "board.png")
     pg.keyboard.press("Control+k"); pg.keyboard.type("refund"); shot(pg, "palette.png"); pg.close()
 
-    pg = page(); pg.goto(f"{demo}/?tab=desk"); pg.click("button[aria-label=Preferences]"); pg.click("text=Compact"); pg.keyboard.press("Escape")
-    pg.mouse.click(700, 500); shot(pg, "board-compact.png"); pg.close()
+    pg = page(); pg.goto(f"{demo}/?tab=board"); pg.click("button[aria-label=Preferences]"); pg.click("text=Compact"); pg.keyboard.press("Escape")
+    pg.mouse.click(700, 120); shot(pg, "board-compact.png"); pg.close()
 
-    pg = page({"width": 1024, "height": 768}); pg.goto(f"{demo}/?tab=desk&task=6"); shot(pg, "board-1024.png"); pg.close()
-    pg = page(); pg.goto(f"{demo}/?tab=library"); shot(pg, "library.png"); pg.close()
-    pg = page(); pg.goto(f"{demo}/?tab=console"); shot(pg, "console.png"); pg.close()
-    pg = page({"width": 390, "height": 844}, 2); pg.goto(f"{demo}/?tab=desk&task=6"); shot(pg, "board-mobile.png"); pg.close()
+    pg = page(); pg.goto(f"{demo}/?tab=board"); pg.click(".repo-chip"); shot(pg, "workspaces.png"); pg.close()
+    pg = page(); pg.goto(f"{demo}/?tab=console"); pg.click(".mp-btn"); shot(pg, "models.png"); pg.close()
+    for tab in ("console", "providers", "measured", "skills"):
+        pg = page(); pg.goto(f"{demo}/?tab={tab}"); shot(pg, f"{tab}.png")
+        if tab == "measured":
+            pg.wait_for_selector(".scatter"); pg.locator(".card:has(.scatter)").screenshot(path=str(out / "measured-chart.png")); print("wrote", out / "measured-chart.png")
+        if tab == "providers":
+            pg.wait_for_selector(".card:has(table.tbl)"); pg.locator(".card:has(table.tbl)").first.screenshot(path=str(out / "providers-models.png")); print("wrote", out / "providers-models.png")
+        pg.close()
+    pg = page({"width": 1024, "height": 768}); pg.goto(f"{demo}/?tab=board&task=6"); shot(pg, "board-1024.png"); pg.close()
+    pg = page({"width": 390, "height": 844}, 2); pg.goto(f"{demo}/?tab=board&task=6"); shot(pg, "board-mobile.png"); pg.close()
+    pg = page({"width": 390, "height": 844}, 2); pg.goto(f"{demo}/?tab=measured"); shot(pg, "measured-mobile.png")
+    pg.wait_for_selector(".scatter"); pg.locator(".scatter").scroll_into_view_if_needed(); shot(pg, "measured-chart-mobile.png"); pg.close()
     if empty:
-        pg = page(); pg.goto(f"{empty}/?tab=desk"); shot(pg, "first-run.png"); pg.close()
+        pg = page(); pg.goto(f"{empty}/?tab=board"); shot(pg, "first-run.png"); pg.close()
     b.close()
