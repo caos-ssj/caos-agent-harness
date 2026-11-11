@@ -19,13 +19,24 @@ folder, out, commands = Path(sys.argv[1]), sys.argv[2], sys.argv[3:]
 ANSI = re.compile(r"\x1b\[([0-9;]*)m")
 
 
+CLEAN = re.compile(r"\x1b\[\?[0-9;]*[a-zA-Z]|\x1b\[[0-9;]*[A-HJKSTfn]|\x1b[=>]|\r")
+
+
 def run(cmd: str) -> str:
+    """`command` runs it; `command::text` also types `text` into it (use \\n for Enter), the way a person would in a session."""
+    cmd, _, typed = cmd.partition("::")
     argv = [sys.executable, "-m", "caos_harness", *cmd.split()[1:]] if cmd.startswith("caos-harness") else cmd.split()
     env = {**os.environ, "PYTHONPATH": str(ROOT), "TERM": "xterm-256color", "COLUMNS": "100"}
     env.pop("NO_COLOR", None)
     master, slave = pty.openpty()
-    proc = subprocess.Popen(argv, stdout=slave, stderr=slave, cwd=folder, env=env, close_fds=True)
+    proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, cwd=folder, env=env, close_fds=True)
     os.close(slave)
+    if typed:
+        import time
+        time.sleep(1.2)
+        for ch in typed.replace("\\n", "\n"):
+            os.write(master, ch.encode())
+            time.sleep(0.01 if ch != "\n" else 0.6)
     chunks = b""
     while True:
         try:
@@ -36,7 +47,7 @@ def run(cmd: str) -> str:
             break
         chunks += data
     proc.wait()
-    return chunks.decode().replace("\r\n", "\n")
+    return CLEAN.sub("", chunks.decode().replace("\r\n", "\n"))
 
 
 def to_html(text: str) -> str:
@@ -65,7 +76,7 @@ def to_html(text: str) -> str:
 
 blocks = []
 for cmd in commands:
-    blocks.append(f'<div class="p"><span class="d">$</span> {html.escape(cmd)}</div><pre>{to_html(run(cmd)).rstrip()}</pre>')
+    blocks.append(f'<div class="p"><span class="d">$</span> {html.escape(cmd.partition("::")[0])}</div><pre>{to_html(run(cmd)).rstrip()}</pre>')
 page = f"""<body style="margin:0;background:#060607"><div style="width:820px;padding:22px 26px 24px;background:#060607;color:#A9A8A3;font:14px/1.55 'JetBrains Mono',ui-monospace,monospace">
 <style>pre{{margin:2px 0 18px;font:inherit;white-space:pre}} .p{{color:#EDEAE5}} .d{{color:#8B8A86}}</style>{''.join(blocks)}</div></body>"""
 with sync_playwright() as p:

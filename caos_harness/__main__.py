@@ -22,6 +22,7 @@ COMMANDS = {
 
 
 WORK = {
+    "repl": "the interactive session (also what plain `caos-harness` opens on a terminal): banner, what waits for you, / commands",
     "init": "create harness.toml and .harness/ in this folder",
     "task": "task add \"<text>\" (--queue <agent> | --tier <tier>) [--skill <name>] · task list [--all] · task show <id>",
     "run": "send pending tasks to their agents and store what they deliver [--agent <name>]",
@@ -76,7 +77,7 @@ def short(text: str, n: int = 72) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def work(cmd: str, rest: list[str]) -> int:
+def work(cmd: str, rest: list[str], project=None) -> int:
     from pathlib import Path
 
     from . import app, style
@@ -84,7 +85,7 @@ def work(cmd: str, rest: list[str]) -> int:
         if cmd == "init":
             print("created", app.init(Path.cwd()))
             return 0
-        p = app.load()
+        p = project or app.load()
         b = p.board
         if cmd == "task":
             sub, args = (rest[0], rest[1:]) if rest else ("list", [])
@@ -200,8 +201,22 @@ def work(cmd: str, rest: list[str]) -> int:
 
 def main(argv: list[str]) -> int:
     if not argv:
+        # On a terminal, `caos-harness` opens the interactive session; piped or scripted, it prints the entry screen.
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from . import app, repl
+            try:
+                return repl.run(app.load())
+            except app.ConfigError:
+                pass
         print(home())
         return 0
+    if argv[0] == "repl":
+        from . import app, repl
+        try:
+            return repl.run(app.load(), interactive=False if not sys.stdin.isatty() else None)
+        except app.ConfigError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
     if argv[0] in ("-h", "--help", "help"):
         print(usage())
         return 0

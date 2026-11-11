@@ -492,8 +492,13 @@ def make_handler(api: Api):
     return Handler
 
 
+def make_server(project: app.Project, port: int = 8791) -> ThreadingHTTPServer:
+    """The dashboard's HTTP server, bound to loopback only and not yet serving: `serve` blocks on it, the REPL runs it in a thread."""
+    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(Api(project)))
+
+
 def serve(project: app.Project, port: int = 8791) -> int:
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(Api(project)))
+    httpd = make_server(project, port)
     print(f"caos-harness · {project.root.name} · http://127.0.0.1:{port}  (Ctrl-C to stop)", flush=True)
     try:
         httpd.serve_forever()
