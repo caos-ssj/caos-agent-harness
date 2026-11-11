@@ -30,13 +30,13 @@ export const ToolStepsView: React.FC<ToolStepsViewProps> = ({ steps }) => {
       case 'bash':
         return <Terminal className="w-3.5 h-3.5 text-caos-greenText" />
       case 'write':
-        return <FileCode className="w-3.5 h-3.5 text-caos-ambar" />
+        return <FileCode className="w-3.5 h-3.5 text-caos-gris" />
       case 'read':
         return <BookOpen className="w-3.5 h-3.5 text-caos-champan" />
       case 'skill':
         return <Cpu className="w-3.5 h-3.5 text-caos-blueText" />
       case 'memory':
-        return <Database className="w-3.5 h-3.5 text-purple-400" />
+        return <Database className="w-3.5 h-3.5 text-caos-gris" />
       default:
         return <Terminal className="w-3.5 h-3.5 text-caos-gris" />
     }
@@ -97,7 +97,7 @@ export const ToolStepsView: React.FC<ToolStepsViewProps> = ({ steps }) => {
                   {step.status === 'awaiting_approval' && <span className="text-caos-champan">waiting for your approval</span>}
                   {step.status === 'denied' && <span className="text-caos-gris">rechazado</span>}
                   {step.status === 'running' && (
-                    <span className="flex items-center gap-1 text-caos-ambar animate-pulse">
+                    <span className="flex items-center gap-1 text-caos-gris animate-pulse">
                       <Clock className="w-3.5 h-3.5 animate-spin" />
                       <span>ejecutando</span>
                     </span>
@@ -143,7 +143,7 @@ export const ToolStepsView: React.FC<ToolStepsViewProps> = ({ steps }) => {
                           {copiedIndex === idx ? (
                             <>
                               <Check className="w-3 h-3 text-caos-greenText" />
-                              <span className="text-caos-greenText">Copiado</span>
+                              <span className="text-caos-greenText">Copied</span>
                             </>
                           ) : (
                             <>

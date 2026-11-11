@@ -72,6 +72,7 @@ export interface StateResponse {
   stats: BoardStats
   quality?: Quality
   running: boolean
+  sample?: boolean
   last_run: Array<{ id: number; ok: boolean; reason: string }>
   skills: SkillInfo[]
   tiers: string[]
