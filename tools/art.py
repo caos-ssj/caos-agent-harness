@@ -148,7 +148,40 @@ def mark():
     return plate(n, {}, body)
 
 
-EMBLEMS = {"mark": mark, "board": board, "router": router, "policy": policy, "memory": memory, "review": review, "traces": traces, "person": person}
+def models():
+    """Orbits: three rings, a few beads on each. The warm bead is the one the router would pick."""
+    n = "models"
+    beads = [(30, -40, 8), (58, 70, 11), (58, 200, 7), (86, 20, 9), (86, 135, 12), (86, 255, 7)]
+    pos = [(120 + r * math.cos(math.radians(a)), 120 + r * math.sin(math.radians(a)), b) for r, a, b in beads]
+    clips = {f"b{i}": f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{b}"/>' for i, (x, y, b) in enumerate(pos)}
+    body = rays(120, 120, 96, 116, 96, stroke=DIM, w=0.5)
+    body += outline("".join(f'<circle cx="120" cy="120" r="{r}"/>' for r in (30, 58, 86)), DIM, 0.8)
+    body += "".join(hatch(f"{n}-b{i}", 45 if i % 2 else -45, 2.6) for i in range(len(pos)))
+    body += outline("".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{b}"/>' for x, y, b in pos))
+    x, y, b = pos[1]
+    body += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{b}" stroke="{WARM}" stroke-width="1.6"/>'
+    body += outline('<circle cx="120" cy="120" r="3"/>', BRIGHT, 1)
+    return plate(n, clips, body)
+
+
+def workspace():
+    """A cabinet of drawers: one folder per project. The warm line is the drawer in use."""
+    n = "workspace"
+    drawers = [(64, 54 + i * 48, 112, 42) for i in range(3)]
+    clips = {f"d{i}": f'<rect x="{x}" y="{y}" width="{w}" height="{h}"/>' for i, (x, y, w, h) in enumerate(drawers)}
+    body = rays(120, 126, 92, 114, 72, lambda i: 22 < i < 50, stroke=DIM, w=0.5)
+    body += "".join(hatch(f"{n}-d{i}", 90 if i % 2 else 0, 4.5, DIM, 0.5) for i in range(3))
+    frame = "".join(f'<rect x="{x}" y="{y}" width="{w}" height="{h}"/>' for x, y, w, h in drawers)
+    handles = "".join(f'<rect x="{x + 40}" y="{y + 26}" width="32" height="6"/>' for x, y, w, h in drawers)
+    labels = "".join(f'<rect x="{x + 36}" y="{y + 8}" width="40" height="12"/>' for x, y, w, h in drawers)
+    body += outline(frame) + outline(handles, SILVER, 0.9) + outline(labels, SILVER, 0.8)
+    body += outline('<path d="M58 54 V198 M182 54 V198 M58 198 H182"/>', SILVER, 0.8)
+    x, y, w, h = drawers[1]
+    body += f'<rect x="{x + 36}" y="{y + 8}" width="40" height="12" stroke="{WARM}" stroke-width="1.6"/>'
+    return plate(n, clips, body)
+
+
+EMBLEMS = {"mark": mark, "board": board, "router": router, "policy": policy, "memory": memory, "review": review, "traces": traces, "person": person, "models": models, "workspace": workspace}
 
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "web/public/art")
