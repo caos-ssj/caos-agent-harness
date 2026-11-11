@@ -16,7 +16,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .. import app
+from .. import app, workspaces
 from ..board.core import VERDICTS
 from ..router.route import choose, load_profiles, load_tiers
 from ..skills import load_all
@@ -65,16 +65,19 @@ class Api:
     def providers_info(self) -> dict:
         """What can actually run. Only Ollama is wired; cloud entries say whether their key is present in the environment
         and nothing else: no prices and no model lists, because none of that is measured or used here."""
-        models, status = [], "offline"
+        models, details, status = [], [], "offline"
         try:
             req = urllib.request.Request("http://127.0.0.1:11434/api/tags", headers={"User-Agent": "caos-harness"})
             with urllib.request.urlopen(req, timeout=1.0) as resp:
-                models = [m.get("name") for m in json.loads(resp.read().decode()).get("models", [])]
+                tags = json.loads(resp.read().decode()).get("models", [])
+                models = [m.get("name") for m in tags]
+                details = [{"name": m.get("name"), "size": m.get("size"), "parameter_size": (m.get("details") or {}).get("parameter_size"),
+                            "quantization": (m.get("details") or {}).get("quantization_level"), "family": (m.get("details") or {}).get("family")} for m in tags]
                 status = "online"
         except Exception:
             pass
         providers = [{"id": "ollama", "name": "Ollama (local)", "type": "local", "status": status, "wired": True, "quota": "local", "cost_per_m": "local compute",
-                      "models": models, "default_model": "qwen2.5:7b" if "qwen2.5:7b" in models else (models[0] if models else ""),
+                      "models": models, "model_details": details, "default_model": "qwen2.5:7b" if "qwen2.5:7b" in models else (models[0] if models else ""),
                       "description": "Models served by the local Ollama service. The only provider the console and the board agents use.", "is_fallback": True}]
         for pid, name, env in (("anthropic", "Anthropic", "ANTHROPIC_API_KEY"), ("deepseek", "DeepSeek", "DEEPSEEK_API_KEY"), ("openai", "OpenAI", "OPENAI_API_KEY")):
             providers.append({"id": pid, "name": name, "type": "cloud", "status": "key_present" if os.environ.get(env) else "missing_key", "wired": False,
@@ -126,6 +129,33 @@ class Api:
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps(keep, indent=2, ensure_ascii=False), encoding="utf-8")
         return {**keep, "enabled": False, "strategy": "not_implemented"}
+
+    def workspaces(self) -> dict:
+        return {"current": str(self.p.root), "items": workspaces.listing(self.p.root)}
+
+    def workspace_add(self, body: dict) -> dict:
+        workspaces.register(body.get("path"), bool(body.get("initialize")))
+        return self.workspaces()
+
+    def workspace_remove(self, body: dict) -> dict:
+        target = workspaces.check(body.get("path"))
+        if target == self.p.root:
+            raise app.ConfigError("this is the workspace in use; switch to another one first")
+        workspaces.forget(str(target))
+        return self.workspaces()
+
+    def workspace_switch(self, body: dict) -> dict:
+        """Points the dashboard at another folder from the list. Refused while anything is running, and every session starts with shell commands off again."""
+        target = workspaces.check(body.get("path"))
+        if str(target) not in workspaces.registered() and target != self.p.root:
+            raise app.ConfigError("that folder is not in the list: add it first")
+        if self.running.locked() or any(r.snapshot()["status"] in ("queued", "running", "awaiting_approval", "finishing") for r in self.runs.values()):
+            raise app.ConfigError("something is running here; wait for it to finish before switching")
+        project = app.load(target / app.CONFIG)
+        workspaces.remember(self.p.root)   # so the folder being left can be switched back to
+        self.p, self.last_run = project, []
+        self.commands_on.clear()
+        return self.workspaces()
 
     def repositories(self) -> list[dict]:
         """The project the server was started in. The console only runs commands there."""
@@ -301,7 +331,7 @@ class Api:
         agents = [{"name": a.name, "system": a.system, "command": " ".join(a.command), "timeout": a.timeout,
                    "pending": sum(1 for t in tasks if t["queue"] == a.name and t["status"] == "pending"),
                    "working": sum(1 for t in tasks if t["agent"] == a.name and t["status"] == "sending")} for a in self.p.agents.values()]
-        return {"project": self.p.root.name, "now": time.time(), "agents": agents, "tasks": tasks, "stats": b.stats(), "quality": self.quality(), "running": self.running.locked(),
+        return {"project": self.p.root.name, "root": str(self.p.root), "now": time.time(), "agents": agents, "tasks": tasks, "stats": b.stats(), "quality": self.quality(), "running": self.running.locked(),
                 "last_run": self.last_run, "sample": (self.p.root / ".harness" / "sample").is_file(), "skills": [{"name": s.name, "description": s.description, "local": s.local} for s in load_all().values()], "tiers": list(load_tiers())}
 
     def task(self, tid: int) -> dict | None:
@@ -410,6 +440,8 @@ def make_handler(api: Api):
                 return self.send_json(200, api.router_table())
             if path == "/api/providers":
                 return self.send_json(200, api.providers_info())
+            if path == "/api/workspaces":
+                return self.send_json(200, api.workspaces())
             if path == "/api/repositories":
                 return self.send_json(200, api.repositories())
             if path == "/api/workspace/status":
@@ -459,6 +491,12 @@ def make_handler(api: Api):
             try:
                 if path == "/api/task":
                     return self.send_json(201, api.add(body))
+                if path == "/api/workspaces":
+                    return self.send_json(200, api.workspace_add(body))
+                if path == "/api/workspaces/switch":
+                    return self.send_json(200, api.workspace_switch(body))
+                if path == "/api/workspaces/remove":
+                    return self.send_json(200, api.workspace_remove(body))
                 if path == "/api/workspace/convert_task":
                     return self.send_json(201, api.add(body))
                 if path == "/api/run":
