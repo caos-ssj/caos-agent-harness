@@ -181,7 +181,92 @@ def workspace():
     return plate(n, clips, body)
 
 
-EMBLEMS = {"mark": mark, "board": board, "router": router, "policy": policy, "memory": memory, "review": review, "traces": traces, "person": person, "models": models, "workspace": workspace}
+def local():
+    """A machine on a desk: the model that runs here, on this computer."""
+    n = "local"
+    screen = '<rect x="58" y="62" width="124" height="86" rx="4"/>'
+    inner = '<rect x="68" y="72" width="104" height="66"/>'
+    clips = {"s": screen, "i": inner}
+    body = rays(120, 105, 84, 112, 80, lambda i: 14 < i < 66, stroke=DIM, w=0.5)
+    body += hatch(f"{n}-s", 60, 3.2) + f'<g clip-path="url(#{n}-i)"><rect width="{S}" height="{S}" fill="#060607"/></g>'
+    lines = "".join(f'<line x1="78" y1="{y}" x2="{x}" y2="{y}"/>' for y, x in ((88, 140), (100, 154), (112, 128), (124, 146)))
+    body += f'<g stroke="{SILVER}" stroke-width="0.9">{lines}</g>'
+    body += outline(screen + inner + '<path d="M104 148 V166 M136 148 V166 M84 172 H156"/>')
+    body += f'<line x1="78" y1="112" x2="128" y2="112" stroke="{WARM}" stroke-width="1.6"/>'
+    return plate(n, clips, body)
+
+
+def cloud():
+    """A cloud drawn in contour lines: a provider that lives somewhere else. The key line is the key in the environment."""
+    n = "cloud"
+    cl = '<path d="M72 150 a28 28 0 0 1 6 -55 a40 40 0 0 1 76 -8 a30 30 0 0 1 14 63 z"/>'
+    clips = {"c": cl}
+    body = rays(120, 118, 84, 112, 72, lambda i: 30 < i < 44, stroke=DIM, w=0.5)
+    body += hatch(f"{n}-c", 0, 4.2, DIM, 0.55) + hatch(f"{n}-c", 90, 12, DIM, 0.4)
+    body += outline(cl) + outline('<path d="M104 176 H136 M112 188 H128"/>', SILVER, 0.8)
+    body += f'<path d="M112 150 V172 M128 150 V172 M112 172 H128" stroke="{WARM}" stroke-width="1.6" fill="none"/>'
+    return plate(n, clips, body)
+
+
+def empty():
+    """An empty tray: nothing is waiting here."""
+    n = "empty"
+    tray = '<path d="M46 132 H194 L178 176 H62 z"/>'
+    clips = {"t": tray}
+    body = rays(120, 120, 84, 112, 80, lambda i: i % 2, stroke=DIM, w=0.5)
+    body += hatch(f"{n}-t", 70, 3.4)
+    body += outline(tray + '<path d="M46 132 L62 96 H178 L194 132"/><path d="M96 112 H144" stroke-dasharray="2 4"/>')
+    body += f'<path d="M58 132 H182" stroke="{WARM}" stroke-width="1.5"/>'
+    return plate(n, clips, body)
+
+
+def hourglass():
+    """Waiting for a run: sand falling through the neck."""
+    n = "hourglass"
+    top = '<path d="M86 52 H154 L124 112 H116 z"/>'
+    bot = '<path d="M116 128 H124 L154 188 H86 z"/>'
+    clips = {"t": top, "b": bot}
+    body = rays(120, 120, 78, 110, 80, lambda i: i % 3 == 0, stroke=DIM, w=0.5)
+    body += hatch(f"{n}-t", 0, 8, DIM, 0.6) + hatch(f"{n}-b", 0, 3.2)
+    body += outline(top + bot + '<path d="M78 52 H162 M78 188 H162"/>')
+    body += f'<path d="M120 112 V128" stroke="{WARM}" stroke-width="1.6"/>'
+    return plate(n, clips, body)
+
+
+def cover():
+    """The panel's cover plate, wide: lanes on the left, the mark in the middle, a trace climbing on the right."""
+    W, H = 720, 240
+    n = "cover"
+    cx, cy = 360, 124
+    defs, body = [], ""
+    # the burst
+    body += "".join(f'<line x1="{cx + 70 * math.cos(2 * math.pi * i / 180):.1f}" y1="{cy + 70 * math.sin(2 * math.pi * i / 180):.1f}" x2="{cx + (118 + (i % 7) * 4) * math.cos(2 * math.pi * i / 180):.1f}" y2="{cy + (118 + (i % 7) * 4) * math.sin(2 * math.pi * i / 180):.1f}"/>' for i in range(180) if i % 15)
+    body = f'<g stroke="{SILVER}" stroke-width="0.45">{body}</g>'
+    body += f'<g stroke="{DIM}" stroke-width="0.5">' + "".join(f'<line x1="{cx + 52 * math.cos(2 * math.pi * i / 72):.1f}" y1="{cy + 52 * math.sin(2 * math.pi * i / 72):.1f}" x2="{cx + 66 * math.cos(2 * math.pi * i / 72):.1f}" y2="{cy + 66 * math.sin(2 * math.pi * i / 72):.1f}"/>' for i in range(72)) + "</g>"
+    body += f'<g stroke="{SILVER}" stroke-width="0.8"><circle cx="{cx}" cy="{cy}" r="70" fill="none"/></g><g stroke="{BRIGHT}" stroke-width="1.1"><circle cx="{cx}" cy="{cy}" r="50" fill="none"/></g>'
+    body += f'<path d="M{cx} 0 V26" stroke="{WARM}" stroke-width="1.4"/>'
+    # lanes on the left
+    lanes = [(40, 78, 44, 110), (96, 58, 44, 130), (152, 92, 44, 96)]
+    for i, (x, y, w, h) in enumerate(lanes):
+        defs.append(f'<clipPath id="{n}-l{i}"><rect x="{x}" y="{y}" width="{w}" height="{h}"/></clipPath>')
+        body += f'<g clip-path="url(#{n}-l{i})" stroke="{DIM}" stroke-width="0.5">' + "".join(f'<line x1="{x + k * 5}" y1="{y}" x2="{x + k * 5}" y2="{y + h}"/>' for k in range(int(w / 5) + 1)) + "</g>"
+        for j in range(int(h // 34)):
+            ty = y + 8 + j * 34
+            body += f'<rect x="{x + 6}" y="{ty}" width="{w - 12}" height="24" fill="none" stroke="{BRIGHT}" stroke-width="1.1"/>'
+        body += f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="{SILVER}" stroke-width="0.8"/>'
+    body += f'<rect x="102" y="66" width="32" height="24" fill="none" stroke="{WARM}" stroke-width="1.4"/>'
+    # trace on the right
+    beads = [(540, 176, 8), (586, 134, 11), (628, 154, 7), (664, 96, 12), (700, 70, 7)]
+    body += f'<g stroke="{DIM}" stroke-width="0.4">' + "".join(f'<line x1="520" y1="{y}" x2="716" y2="{y}"/>' for y in range(60, 206, 12)) + "</g>"
+    body += f'<path d="M{" L".join(f"{x} {y}" for x, y, _ in beads)}" fill="none" stroke="{BRIGHT}" stroke-width="1.1"/>'
+    body += "".join(f'<circle cx="{x}" cy="{y}" r="{r}" fill="#060607" stroke="{BRIGHT}" stroke-width="1.1"/>' for x, y, r in beads)
+    body += f'<circle cx="664" cy="96" r="12" fill="none" stroke="{WARM}" stroke-width="1.6"/>'
+    body += f'<line x1="24" y1="218" x2="696" y2="218" stroke="{DIM}" stroke-width="0.6"/>'
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" fill="none" stroke-linecap="round" role="img" aria-label="caos-agent-harness"><defs>{"".join(defs)}</defs>{body}</svg>')
+
+
+EMBLEMS = {"mark": mark, "board": board, "router": router, "policy": policy, "memory": memory, "review": review, "traces": traces, "person": person, "models": models, "workspace": workspace,
+           "local": local, "cloud": cloud, "empty": empty, "hourglass": hourglass, "cover": cover}
 
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "web/public/art")
