@@ -251,3 +251,10 @@ def test_shell_commands_are_off_until_switched_on_for_that_session(project):
         api.session_add_message(b, msg)
     assert api.session_commands(a, {"enabled": False})["commands_enabled"] is False
     assert Api(project).session_get(a)["commands_enabled"] is False   # and it does not survive a restart
+
+
+def test_state_says_when_the_project_holds_sample_data(project):
+    api = Api(project)
+    assert api.state()["sample"] is False
+    (project.root / ".harness" / "sample").write_text("sample")
+    assert api.state()["sample"] is True

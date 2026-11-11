@@ -302,7 +302,7 @@ class Api:
                    "pending": sum(1 for t in tasks if t["queue"] == a.name and t["status"] == "pending"),
                    "working": sum(1 for t in tasks if t["agent"] == a.name and t["status"] == "sending")} for a in self.p.agents.values()]
         return {"project": self.p.root.name, "now": time.time(), "agents": agents, "tasks": tasks, "stats": b.stats(), "quality": self.quality(), "running": self.running.locked(),
-                "last_run": self.last_run, "skills": [{"name": s.name, "description": s.description, "local": s.local} for s in load_all().values()], "tiers": list(load_tiers())}
+                "last_run": self.last_run, "sample": (self.p.root / ".harness" / "sample").is_file(), "skills": [{"name": s.name, "description": s.description, "local": s.local} for s in load_all().values()], "tiers": list(load_tiers())}
 
     def task(self, tid: int) -> dict | None:
         r = self.p.board.get(tid)
