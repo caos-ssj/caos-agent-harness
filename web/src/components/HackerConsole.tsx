@@ -269,7 +269,7 @@ export const HackerConsole: React.FC<HackerConsoleProps> = ({
               }`}
             >
               <FolderGit2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Contexto</span>
+              <span className="hidden sm:inline">Context</span>
             </button>
 
             {/* Atajo Ctrl+K */}
@@ -372,7 +372,7 @@ export const HackerConsole: React.FC<HackerConsoleProps> = ({
 
                       <div className="flex items-center gap-3 text-caos-tenue text-[11px]">
                         {msg.tokens && (
-                          <span>{msg.tokens.toLocaleString()} tokens</span>
+                          <span>{msg.tokens.toLocaleString("en-US")} tokens</span>
                         )}
                         {msg.cost_saved && msg.cost_saved > 0 && (
                           <span className="text-caos-greenText font-bold">
@@ -599,7 +599,7 @@ export const HackerConsole: React.FC<HackerConsoleProps> = ({
         </div>
       </div>
 
-      {/* Cajón Lateral de Herramientas y Contexto del Repositorio */}
+      {/* Cajón Lateral de Herramientas y Project context */}
       <WorkspaceDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}

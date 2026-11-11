@@ -183,10 +183,10 @@ export const RouterView: React.FC = () => {
                         {(p.coverage * 100).toFixed(0)}%
                       </td>
                       <td className="px-6 py-3 text-caos-gris tabular-nums">
-                        {p.seconds_per_1000.toLocaleString()} s
+                        {p.seconds_per_1000.toLocaleString("en-US")} s
                       </td>
                       <td className="px-6 py-3 text-caos-gris tabular-nums">
-                        {p.tokens_per_1000 != null ? p.tokens_per_1000.toLocaleString() : '—'}
+                        {p.tokens_per_1000 != null ? p.tokens_per_1000.toLocaleString("en-US") : '—'}
                       </td>
                       <td className="px-6 py-3 text-caos-tenue text-[11px]">
                         {p.measured}

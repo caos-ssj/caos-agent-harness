@@ -85,7 +85,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         <div className="flex items-center gap-2">
           <FolderGit2 className="w-4 h-4 text-caos-ambar" />
           <h4 className="font-mono text-xs font-bold text-caos-hueso uppercase tracking-wider">
-            Contexto del Repositorio
+            Project context
           </h4>
         </div>
         <button

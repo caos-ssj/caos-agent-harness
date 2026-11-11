@@ -155,10 +155,10 @@ export const StatsView: React.FC<StatsViewProps> = ({ state }) => {
                       {(p.coverage * 100).toFixed(0)}%
                     </td>
                     <td className="px-4 py-3 text-caos-gris">
-                      {p.seconds_per_1000.toLocaleString()} s
+                      {p.seconds_per_1000.toLocaleString("en-US")} s
                     </td>
                     <td className="px-4 py-3 text-caos-tenue">
-                      {p.tokens_per_1000 != null ? `${p.tokens_per_1000.toLocaleString()} tokens` : '—'}
+                      {p.tokens_per_1000 != null ? `${p.tokens_per_1000.toLocaleString("en-US")} tokens` : '—'}
                     </td>
                   </tr>
                 ))}
