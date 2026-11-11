@@ -1,5 +1,7 @@
 # caos-agent-harness
 
+![caos-agent-harness](docs/cover.svg)
+
 The harness I run my AI agents with: a **task board** that routes work and holds it for review, a **policy layer** between the model and its tools, a **model router** driven by measured results, **shared memory** over MCP, **role skills**, **evaluation gates**, a **human review queue** for what the system is not sure about, and one **trace** format for every step. Everything reruns with `make`.
 
 ![The board: queues, tasks and the trace of one task](docs/board.png)
@@ -162,6 +164,7 @@ caos-harness serve                                  # the same board in the brow
 - **Workspaces:** the folder chip at the top switches between project folders you listed (each keeps its own board, traces and sessions in its `.harness/`). Adding a folder checks it is a real directory with a valid `harness.toml`, or creates one if you ask. The list is kept in `~/.config/caos-harness/workspaces.json`; the browser can only switch to a folder on that list, never while something is running, and shell commands start off again.
 - **Models:** the Console's model picker shows each installed Ollama model with its size, whether it was measured, how well (precision and its lower bound), which cost of error it clears and which agents run it. **Providers** is the same information as a table, one row per installed model; the other providers only say whether their key is in the environment.
 - **Measured:** four tiles (waiting for you, tasks, reviewed, faults caught), each with a bar that shows its parts and the command that produced it, then a chart of reliability against time with one point per measured system (shape for the model family, filled when it runs behind the rules) against the line each cost of error asks for, and the same data with its intervals.
+- **Working the board:** search tasks by words, number or queue; save a combination of queue, scope and search as a named view; drag a task that has not been sent onto another queue (or use *Move to* in the open task); the trace of a task that is being sent updates live; export a task's whole life as Markdown or JSON; optional notifications when a task lands waiting for review, and the tab title always counts what needs you.
 - **Keys:** `⌘K` / `Ctrl+K` goes anywhere or finds a task by number or words, `j` / `k` move through tasks, `n` writes one, `r` runs what is pending.
 - **Preferences:** density, text size (standard or large) and the view the page opens on. Stored in your browser only.
 - **Sample data:** `python3 tools/seed_demo.py /tmp/harness-demo` builds a project of made-up tasks and canned answers; the page labels it "Sample data".
