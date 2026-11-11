@@ -67,6 +67,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({ agents, profiles, 
           <div className="tile-top"><span>Ollama, on this machine</span></div>
           <div className="tile-value" style={{ fontSize: 30 }}>{ollama ? STATUS[ollama.status] ?? ollama.status : '…'}</div>
           <div className="tile-sub">The only provider that runs work here: the Console and every agent use it.</div>
+          <img className="tile-plate" src="/art/local.svg" alt="" aria-hidden="true" />
         </div>
         <div className="card tile">
           <div className="tile-top"><span>Installed models</span></div>
@@ -113,7 +114,7 @@ export const ProvidersView: React.FC<ProvidersViewProps> = ({ agents, profiles, 
         {unmeasured.length === 0 && <p className="mute">Every installed model has been measured.</p>}
       </div>
 
-      <div className="section-title"><h2>Other providers</h2></div>
+      <div className="section-title"><h2>Other providers</h2><img className="inline-plate" src="/art/cloud.svg" alt="" aria-hidden="true" /></div>
       <p className="lead">Listed only to say whether their key is in the environment. They are not wired to the Console or the agents.</p>
       <div className="card" style={{ padding: '4px 22px 6px', overflowX: 'auto' }}>
         <table className="tbl">

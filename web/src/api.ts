@@ -335,6 +335,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ verdict, note }),
     }),
+  moveTask: (id: number, queue: string) =>
+    request<{ id: number; queue: string }>(`/api/task/${id}/move`, { method: 'POST', body: JSON.stringify({ queue }) }),
   discardTask: (id: number) =>
     request<{ id: number }>(`/api/task/${id}/discard`, {
       method: 'POST',

@@ -261,6 +261,8 @@ textarea, input { caret-color: var(--warm); }
 
 .detail { padding: 6px 18px 20px; animation: surface-enter 240ms var(--ease) both; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 28px; padding-top: 6px; }
+.detail .h-row { margin: 18px 0 8px; }
+.detail .h-row h3 { margin: 0; }
 .detail h3 { margin: 18px 0 8px; font: 500 19px var(--serif); color: var(--ink-2); }
 .detail h3:first-child { margin-top: 12px; }
 .detail .body { margin: 0; max-width: 66ch; }
@@ -634,3 +636,43 @@ textarea, input { caret-color: var(--warm); }
   .tabs button { position: relative; }
   .btn-run .run-n { display: inline; font-weight: 700; }
 }
+
+/* ── Board tools: search, saved views, drag, export, live ───────────────── */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 26px; }
+.search-field { position: relative; flex: 1 1 280px; display: block; }
+.search-field .icon { position: absolute; left: 13px; top: 50%; margin-top: -9px; color: var(--ink-3); pointer-events: none; }
+.search-field .field { width: 100%; padding-left: 40px; }
+.views { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.view-chip { display: inline-flex; align-items: center; border-radius: 99px; border: 1px solid var(--edge-2); background: var(--card-2); }
+.view-chip button { padding: 4px 6px 4px 12px; font: 600 13px var(--sans); color: var(--ink); border-radius: 99px 0 0 99px; }
+.view-chip button + button { padding: 4px 10px 4px 4px; color: var(--ink-3); border-radius: 0 99px 99px 0; }
+.view-chip button:hover { color: var(--warm-soft); }
+.task { position: relative; }
+.grip { z-index: 2; position: absolute; left: 3px; top: 50%; margin-top: -11px; width: 18px; height: 22px; display: grid; place-items: center; color: var(--ink-3); cursor: grab; border-radius: 6px; opacity: 0; transition: opacity 150ms var(--ease); }
+.grip .icon { width: 15px; height: 15px; }
+.task:hover .grip, .grip:focus-visible { opacity: 1; }
+.grip:hover { color: var(--ink); background: var(--card-3); }
+@media (hover: none) { .grip { display: none; } }
+.task.dragging { opacity: .45; }
+.lane.drop { border-color: var(--ink); background: var(--card-3); transform: translateY(-2px); box-shadow: 0 0 0 3px rgba(237, 234, 229, .12); }
+.move-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0 0; font-size: 14.5px; }
+.move-row label { font: 600 13.5px var(--sans); color: var(--ink-2); }
+.h-row { display: flex; align-items: center; gap: 12px; }
+.live-tag { display: inline-flex; align-items: center; gap: 7px; font: 600 12px var(--sans); color: var(--ink); }
+.exports { margin-left: auto; display: inline-flex; gap: 4px; }
+.lane-empty { display: inline-flex; align-items: center; gap: 8px; }
+.lane-empty img { width: 34px; height: 34px; opacity: .8; }
+.wait-hint { display: flex; align-items: center; gap: 14px; margin: 0 0 10px; padding: 8px 12px 8px 8px; border-radius: var(--r-md); border: 1px dashed var(--edge-2); font-size: 14.5px; color: var(--ink-2); flex-wrap: wrap; }
+.wait-hint img { width: 52px; height: 52px; flex: none; }
+.wait-hint b { color: var(--ink); font-weight: 600; }
+.wait-hint span { flex: 1 1 260px; }
+.steps-cover { display: block; width: 100%; max-height: 190px; object-fit: contain; padding: 14px 24px 0; opacity: .95; }
+@media (max-width: 640px) { .exports { margin-left: 0; } .steps-cover { max-height: 120px; } }
+.name-view { display: inline-flex; gap: 8px; align-items: center; }
+.name-view .field { min-height: 32px; width: 180px; padding: 4px 10px; }
+.tile { position: relative; }
+.tile-plate { position: absolute; right: 12px; bottom: 8px; width: 92px; height: 92px; opacity: .85; pointer-events: none; }
+.inline-plate { width: 64px; height: 64px; margin: -22px 0 -22px; opacity: .85; }
+.dropbar { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 45; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; max-width: calc(100vw - 24px); padding: 8px 12px 8px 16px; border-radius: 22px; background: var(--card-3); border: 1px solid var(--edge-2); box-shadow: var(--shadow-pop); font-size: 14px; color: var(--ink-2); animation: pop 160ms var(--ease) both; }
+.dropbar button { padding: 6px 14px; border-radius: 99px; border: 1px dashed var(--edge-2); font: 600 13.5px var(--sans); color: var(--ink); }
+.dropbar button.drop { background: var(--ink); color: var(--ground); border-style: solid; }

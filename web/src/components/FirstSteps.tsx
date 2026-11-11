@@ -21,7 +21,7 @@ export const FirstSteps: React.FC<FirstStepsProps> = ({ tasks, agents, runnable,
   const cls = (done: boolean, now: boolean) => (done ? 'done' : now ? 'now' : 'wait')
   return (
     <section className="card steps" aria-labelledby="steps-title">
-      {!hasTask && <img className="steps-plate" src="/art/board.svg" alt="" aria-hidden="true" />}
+      {!hasTask && <img className="steps-cover" src="/art/cover.svg" alt="" aria-hidden="true" />}
       <div className="steps-head">
         <div>
           <h2 id="steps-title">{hasTask ? 'Where you are' : 'Start here'}</h2>
@@ -45,7 +45,7 @@ export const FirstSteps: React.FC<FirstStepsProps> = ({ tasks, agents, runnable,
         <li className={cls(reviewed, delivered && !reviewed)}>
           <span className="step-mark" aria-hidden="true">{reviewed ? <Check size={15} strokeWidth={2} /> : 3}</span>
           <span className="steps-title">Review what came back</span>
-          <p className="steps-text">Open the task on the right, read the delivery and its trace, then accept it, return it with a note, or ask for evidence. From a terminal: <code>caos-harness review 1 ok "ran the tests"</code></p>
+          <p className="steps-text">Open the task, read the delivery and its trace, then accept it, return it with a note, or ask for evidence. From a terminal: <code>caos-harness review 1 ok "ran the tests"</code></p>
         </li>
       </ol>
     </section>

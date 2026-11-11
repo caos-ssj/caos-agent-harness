@@ -3,8 +3,8 @@ import { View } from './lib'
 
 /* What can be personalised, and only that: density changes how many tasks fit on a screen, and the start view is where
    the page opens. Both live in this browser's localStorage; nothing is sent anywhere. */
-export interface Prefs { density: 'comfortable' | 'compact'; text: 'standard' | 'large'; start: View }
-export const DEFAULT_PREFS: Prefs = { density: 'comfortable', text: 'standard', start: 'board' }
+export interface Prefs { density: 'comfortable' | 'compact'; text: 'standard' | 'large'; start: View; notify: boolean }
+export const DEFAULT_PREFS: Prefs = { density: 'comfortable', text: 'standard', start: 'board', notify: false }
 const KEY = 'caos_prefs'
 
 export function usePrefs(): [Prefs, (p: Partial<Prefs>) => void, () => void] {
@@ -14,6 +14,7 @@ export function usePrefs(): [Prefs, (p: Partial<Prefs>) => void, () => void] {
       return {
         density: raw.density === 'compact' ? 'compact' : 'comfortable',
         text: raw.text === 'large' ? 'large' : 'standard',
+        notify: raw.notify === true,
         start: ['board', 'console', 'measured', 'providers', 'skills'].includes(raw.start) ? raw.start : 'board',
       }
     } catch { return DEFAULT_PREFS }

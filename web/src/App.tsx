@@ -47,6 +47,17 @@ export const App: React.FC = () => {
   const tasks = state?.tasks ?? []
   const needsYou = tasks.filter((t) => t.state === 'to_review' || t.state === 'verify' || t.state === 'person').length
   // `run` only sends to agents: a task in the person queue is waiting for a human, not for a run.
+  const seenReview = useRef<number | null>(null)
+  const waitingReview = tasks.filter((t) => t.state === 'to_review').length
+  // The tab title says how many need you; a notification fires only when a new one lands while this page is open.
+  useEffect(() => { document.title = `${needsYou ? `(${needsYou}) ` : ''}caos · ${state?.project ?? 'harness'}` }, [needsYou, state?.project])
+  useEffect(() => {
+    if (!state) return
+    if (seenReview.current != null && waitingReview > seenReview.current && prefs.notify && 'Notification' in window && Notification.permission === 'granted') {
+      try { new Notification('Waiting for your review', { body: `${waitingReview} delivered ${waitingReview === 1 ? 'task is' : 'tasks are'} waiting for a verdict in ${state.project}.` }) } catch { /* ignore */ }
+    }
+    seenReview.current = waitingReview
+  }, [waitingReview, state, prefs.notify])
   const runnable = tasks.filter((t) => t.state === 'pending' && t.queue !== 'person').length
 
   const run = useCallback(async () => {

@@ -40,6 +40,15 @@ export const Preferences: React.FC<PreferencesProps> = ({ prefs, onChange, onRes
           {STARTS.map(([v, label]) => <button key={v} type="button" aria-pressed={prefs.start === v} onClick={() => onChange({ start: v })}>{label}</button>)}
         </div>
       </fieldset>
+      <fieldset>
+        <legend>Notifications</legend>
+        <label className="ws-check"><input type="checkbox" checked={prefs.notify} onChange={async (e) => {
+          const on = e.target.checked
+          if (on && 'Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission() } catch { /* ignore */ } }
+          onChange({ notify: on && 'Notification' in window && Notification.permission === 'granted' })
+        }} />Tell me when a task is waiting for review</label>
+        <p className="hint">{!('Notification' in window) ? 'This browser has no notifications.' : Notification.permission === 'denied' ? 'The browser has blocked notifications for this page.' : 'Only while this page is open. The tab title always shows how many need you.'}</p>
+      </fieldset>
       <div className="pop-foot"><span>kept in this browser</span><button type="button" className="btn btn-quiet btn-sm" onClick={onReset}>Reset</button></div>
     </div>
   )

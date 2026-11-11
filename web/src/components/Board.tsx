@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Clock, Eye, Loader, Play, Plus, RotateCcw, ScanSearch, Send, UserRound, X } from 'lucide-react'
+import { Archive, Bookmark, GripVertical, CheckCircle2, ChevronDown, Download, Search, ChevronRight, CircleSlash, Clock, Eye, Loader, Play, Plus, RotateCcw, ScanSearch, Send, UserRound, X } from 'lucide-react'
 import { api, Agent, RouterResponse, SkillInfo, StateResponse, Task, TaskDetail } from '../api'
 import { PageHead } from './PageHead'
+import { exportJson, exportMarkdown } from '../exportTrace'
+import { SavedView, useSavedViews } from '../views'
 import { CLOSED, NEEDS, age, byNeed, clock, group, isSpecialKey, pad, queueName, routeText, stateLabel } from '../lib'
 import { FirstSteps } from './FirstSteps'
 
@@ -78,6 +80,14 @@ const NewTask: React.FC<{ router: RouterResponse | null; agents: Agent[]; skills
 
 export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelect, onChanged, onRun, runnable, filter, onFilter, newTaskSignal }) => {
   const [showClosed, setShowClosed] = useState(false)
+  const [scope, setScope] = useState<'all' | 'needs' | 'moving' | 'closed'>('all')
+  const [q, setQ] = useState('')
+  const [drag, setDrag] = useState<number | null>(null)
+  const [over, setOver] = useState<string | null>(null)
+  const [views, addView, removeView] = useSavedViews()
+  const [toast, setToast] = useState<string | null>(null)
+  const [naming, setNaming] = useState(false)
+  const [viewName, setViewName] = useState('')
   const [showNew, setShowNew] = useState(false)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [note, setNote] = useState('')
@@ -98,6 +108,12 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
     api.getTask(selectedId).then((d) => live && setDetail(d)).catch((e) => live && setError(e.message))
     return () => { live = false }
   }, [selectedId, sig])
+  // A task that is being sent shows its trace growing: a short poll while it is open.
+  useEffect(() => {
+    if (selectedId == null || sel?.state !== 'sending') return
+    const t = window.setInterval(() => { api.getTask(selectedId).then(setDetail).catch(() => undefined) }, 1500)
+    return () => window.clearInterval(t)
+  }, [selectedId, sel?.state])
 
   const open = useMemo(() => tasks.filter((t) => !CLOSED.has(t.state)), [tasks])
   type Lane = { id: string; title: string; art: string; kind: 'agent' | 'person' | 'review'; model: string | null; precision: number | null; lower: number | null; serves: string[]; live: boolean; items: Task[]; due: boolean; blurb: string }
@@ -114,8 +130,11 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
 
   const rows = useMemo(() => {
     const pick = (t: Task) => (filter === 'needs' ? NEEDS.has(t.state) : filter === 'person' ? t.state === 'person' : filter === 'review' ? t.state === 'to_review' || t.state === 'verify' : filter ? t.queue === filter : true)
-    return [...tasks].filter(pick).sort(byNeed)
-  }, [tasks, filter])
+    const term = q.trim().toLowerCase()
+    const hit = (t: Task) => !term || t.text.toLowerCase().includes(term) || String(t.id) === term.replace(/^#/, '') || queueName(t.queue).toLowerCase().includes(term)
+    const inScope = (t: Task) => scope === 'all' || group(t) === scope
+    return [...tasks].filter(pick).filter(hit).filter(inScope).sort(byNeed)
+  }, [tasks, filter, q, scope])
   const needs = rows.filter((t) => group(t) === 'needs')
   const moving = rows.filter((t) => group(t) === 'moving')
   const closed = rows.filter((t) => group(t) === 'closed')
@@ -143,6 +162,14 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
     try { await fn(); setNote(''); onChanged(); const next = needs.find((t) => t.id !== id); onSelect(next ? next.id : null) }
     catch (e: any) { setError(e.message || 'The board refused that action.') } finally { setBusy(false) }
   }
+  useEffect(() => { if (!toast) return; const t = window.setTimeout(() => setToast(null), 4500); return () => window.clearTimeout(t) }, [toast])
+  const move = async (id: number, queue: string) => {
+    setToast(null)
+    if (tasks.find((t) => t.id === id)?.queue === queue) { setDrag(null); return }   // dropped on its own queue: nothing to do
+    try { await api.moveTask(id, queue); onChanged(); setToast(`Task ${pad(id)} moved to ${queueName(queue)}.`) }
+    catch (e: any) { setToast(e.message || 'That task cannot be moved.') }
+  }
+  const movable = (t: Task) => t.state === 'pending' || t.state === 'person'
   const verdict = (id: number, v: 'ok' | 'redo' | 'verify' | 'superseded') => {
     if (v === 'redo' && !note.trim()) return setError('A returned task needs a note: say what to fix.')
     return act(() => api.reviewTask(id, v, note.trim() || undefined), id)
@@ -155,7 +182,9 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
     const routerWhy = d?.timeline.find((e) => e.source === 'router' && e.reason)?.reason
     const reviewable = t.state === 'to_review' || t.state === 'verify'
     return (
-      <div key={t.id} className={`task ${isOpen ? 'open' : ''} ${group(t)} ${t.state}`} style={{ animationDelay: `${Math.min(i, 10) * 22}ms` }}>
+      <div key={t.id} className={`task ${isOpen ? 'open' : ''} ${group(t)} ${t.state} ${drag === t.id ? 'dragging' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 22}ms` }}
+>
+        {movable(t) && <span className="grip" draggable title="Drag onto a queue card to move this task" aria-hidden="true" onDragStart={(e) => { setDrag(t.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(t.id)); const row = (e.currentTarget.parentElement as HTMLElement); e.dataTransfer.setDragImage(row, 20, 20) }} onDragEnd={() => { setDrag(null); setOver(null) }}><GripVertical className="icon" aria-hidden="true" /></span>}
         <button type="button" className="task-row" aria-expanded={isOpen} onClick={() => onSelect(isOpen ? null : t.id)}>
           <span className="task-id">{pad(t.id)}</span>
           <span className="task-title">{t.text}</span>
@@ -177,9 +206,17 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
                 {d?.result != null ? <pre className="delivered">{d.result || '(the agent printed nothing)'}</pre>
                   : <p className="muted">{t.state === 'person' ? 'Waiting for a person. The trace says why the router sent it here.' : 'Nothing delivered yet. Run the pending tasks to send it to its agent.'}</p>}
                 {t.review_note && <p className="reviewer-note">Reviewer’s note: {t.review_note}</p>}
+                {movable(t) && (
+                  <p className="move-row"><label htmlFor={`mv-${t.id}`}>Move to</label>
+                    <select id={`mv-${t.id}`} className="select" value={t.queue} onChange={(e) => move(t.id, e.target.value)}>
+                      {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}<option value="person">a person</option>
+                    </select><span className="mute">or drag the row onto a queue card.</span></p>
+                )}
               </section>
               <section>
-                <h3>Trace</h3>
+                <div className="h-row"><h3>Trace</h3>{t.state === 'sending' && <span className="live-tag"><i className="live" aria-hidden="true" />live</span>}
+                  {d && <span className="exports"><button type="button" className="btn btn-quiet btn-sm" onClick={() => exportMarkdown(d)}><Download className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Markdown</button><button type="button" className="btn btn-quiet btn-sm" onClick={() => exportJson(d)}>JSON</button></span>}
+                </div>
                 {!d && !error && <p className="muted">Reading the trace…</p>}
                 {d && (
                   <ol className="trace">
@@ -222,7 +259,9 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
   }
 
   const laneCard = (l: Lane) => (
-    <button key={l.id} type="button" className={`lane ${l.due && l.items.length ? 'due' : ''}`} aria-pressed={filter === l.id} onClick={() => onFilter(filter === l.id ? null : l.id)}>
+    <button key={l.id} type="button" className={`lane ${l.due && l.items.length ? 'due' : ''} ${over === l.id ? 'drop' : ''}`} aria-pressed={filter === l.id} onClick={() => onFilter(filter === l.id ? null : l.id)}
+      onDragOver={(e) => { if (drag != null && l.kind !== 'review') { e.preventDefault(); setOver(l.id) } }} onDragLeave={() => setOver((o) => (o === l.id ? null : o))}
+      onDrop={(e) => { e.preventDefault(); if (drag != null && l.kind !== 'review') move(drag, l.kind === 'person' ? 'person' : l.id); setDrag(null); setOver(null) }}>
       <img src={`/art/${l.art}.svg`} alt="" aria-hidden="true" className="lane-art" />
       <span className="lane-head"><span className="lane-name">{l.title}</span><span className="lane-count" aria-label={`${l.items.length} open`}>{l.items.length}</span></span>
       {l.kind === 'agent' && (
@@ -239,7 +278,7 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
         <span className="dots" aria-hidden="true">
           {l.items.slice(0, 12).map((t) => <i key={t.id} className={NEEDS.has(t.state) ? 'needs' : 'moving'} />)}
           {l.items.length > 12 && <em>+{l.items.length - 12}</em>}
-          {l.items.length === 0 && <em>no open tasks</em>}
+          {l.items.length === 0 && <em className="lane-empty"><img src="/art/empty.svg" alt="" aria-hidden="true" />no open tasks</em>}
         </span>
         {l.live && <span className="lane-live"><i className="live" aria-hidden="true" />sending now</span>}
       </span>
@@ -277,9 +316,40 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
       <div className="legend-line" aria-hidden="true"><span><i style={{ background: 'var(--warm)' }} />needs you</span><span><i style={{ border: '1.5px solid var(--ink-2)' }} />in motion</span><span>Click a card to show only its tasks.</span></div>
       {filter && <div className="filter-bar"><span>Showing only: <b>{filter === 'needs' ? 'what needs you' : filter === 'review' ? 'to review' : filter === 'person' ? 'a person' : filter}</b></span><button type="button" className="btn btn-quiet btn-sm" onClick={() => onFilter(null)}><X className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Show everything</button></div>}
 
+      {drag != null && (
+        <div className="dropbar" role="group" aria-label="Drop the task on a queue">
+          <span>Move task {pad(drag)} to</span>
+          {[...agents.map((a) => ({ id: a.name, label: a.name })), { id: 'person', label: 'a person' }].map((qq) => (
+            <button key={qq.id} type="button" className={over === `bar-${qq.id}` ? 'drop' : ''}
+              onDragOver={(e) => { e.preventDefault(); setOver(`bar-${qq.id}`) }} onDragLeave={() => setOver(null)}
+              onDrop={(e) => { e.preventDefault(); move(drag, qq.id); setDrag(null); setOver(null) }}>{qq.label}</button>
+          ))}
+        </div>
+      )}
+      <div className="toolbar" role="search">
+        <label className="search-field"><Search className="icon" aria-hidden="true" /><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks by words, number or queue" aria-label="Search tasks" /></label>
+        <div className="seg" role="group" aria-label="Show">
+          {(['all', 'needs', 'moving', 'closed'] as const).map((k) => <button key={k} type="button" aria-pressed={scope === k} onClick={() => { setScope(k); if (k === 'closed') setShowClosed(true) }}>{k === 'all' ? 'All' : k === 'needs' ? 'Needs you' : k === 'moving' ? 'In motion' : 'Closed'}</button>)}
+        </div>
+        {!naming ? (
+          <button type="button" className="btn btn-sm" disabled={!q.trim() && !filter && scope === 'all'} onClick={() => { setNaming(true); setViewName('') }} title="Keep this combination of queue, scope and search under a name"><Bookmark className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />Save view</button>
+        ) : (
+          <form className="name-view" onSubmit={(e) => { e.preventDefault(); if (viewName.trim()) { addView({ name: viewName.trim().slice(0, 28), queue: filter, scope, q }); setNaming(false) } }}>
+            <input className="field" autoFocus value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this view" aria-label="Name this view" maxLength={28} />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={!viewName.trim()}>Save</button>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setNaming(false)}>Cancel</button>
+          </form>
+        )}
+      </div>
+      {views.length > 0 && <div className="views" aria-label="Saved views">{views.map((v: SavedView) => <span key={v.name} className="view-chip"><button type="button" onClick={() => { onFilter(v.queue && (v.queue === 'person' || v.queue === 'review' || v.queue === 'needs' || agents.some((a) => a.name === v.queue)) ? v.queue : null); setScope(v.scope as 'all' | 'needs' | 'moving' | 'closed'); setQ(v.q); if (v.scope === 'closed') setShowClosed(true) }}>{v.name}</button><button type="button" aria-label={`Delete the view ${v.name}`} onClick={() => removeView(v.name)}><X className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /></button></span>)}</div>}
+      {toast && <p className="note" role="status" style={{ margin: '10px 2px 0' }}>{toast}</p>}
+
       {needs.length > 0 && <div className="group-head due"><span>Needs you</span><span className="n">{needs.length}</span></div>}
       <div className="task-list">{needs.map((t) => row(t, idx++))}</div>
       {moving.length > 0 && <div className="group-head"><span>In motion</span><span className="n">{moving.length}</span></div>}
+      {runnable > 0 && !state?.running && scope !== 'needs' && scope !== 'closed' && (
+        <div className="wait-hint"><img src="/art/hourglass.svg" alt="" aria-hidden="true" /><span><b>{runnable} {runnable === 1 ? 'task is' : 'tasks are'} waiting for an agent.</b> Nothing starts by itself: a run sends them and keeps what each agent prints.</span><button type="button" className="btn btn-primary btn-sm" onClick={onRun}>Run {runnable}</button></div>
+      )}
       <div className="task-list">{moving.map((t) => row(t, idx++))}</div>
       {closed.length > 0 && (
         <div className="group-head"><span>Closed</span><span className="n">{closed.length}</span>
@@ -288,7 +358,14 @@ export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelec
       )}
       {showClosed && <div className="task-list">{closed.map((t) => row(t, idx++))}</div>}
 
-      {tasks.length > 0 && rows.length === 0 && (
+      {tasks.length > 0 && rows.length === 0 && (q.trim() || scope !== 'all') && (
+        <div className="empty-card" style={{ marginTop: 24 }}>
+          <img src="/art/empty.svg" alt="" aria-hidden="true" />
+          <p>No task matches this search.</p>
+          <button type="button" className="btn btn-sm" onClick={() => { setQ(''); setScope('all') }}>Clear the search</button>
+        </div>
+      )}
+      {tasks.length > 0 && rows.length === 0 && !q.trim() && scope === 'all' && (
         <div className="empty-card" style={{ marginTop: 24 }}>
           <img src={`/art/${filter === 'person' ? 'person' : filter === 'review' || filter === 'needs' ? 'review' : 'board'}.svg`} alt="" aria-hidden="true" />
           <p>{filter === 'needs' || filter === 'review' ? 'Nothing is waiting for a verdict.' : filter === 'person' ? 'No task is waiting for a person.' : 'Nothing in this queue.'} Pick another queue above, or add a task.</p>
