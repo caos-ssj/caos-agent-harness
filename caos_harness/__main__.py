@@ -44,6 +44,34 @@ def usage() -> str:
     return "\n".join(lines)
 
 
+def home() -> str:
+    """What `caos-harness` shows on its own: where you are, and the one or two things worth doing next."""
+    from . import app, style
+    lines = [style.banner(), ""]
+    try:
+        p = app.load()
+    except app.ConfigError:
+        lines += ["No project in this folder.", "", style.heading("Start here"),
+                  style.command("caos-harness init", "write harness.toml and .harness/ in this folder"),
+                  style.command("caos-harness demo", "watch the board end to end; no model needed"),
+                  style.command("caos-harness help", "every command"), ""]
+        return "\n".join(lines)
+    s = app.summary(p)
+    word = lambda n, one, many: f"{n} {one if n == 1 else many}"
+    lines += [f"{style.paint(p.root.name, style.HUESO, True)}  {style.dim(word(s['agents'], 'agent', 'agents'))}",
+              f"{word(s['tasks'], 'task', 'tasks')}" + (f" · {style.paint(str(s['needs_you']) + ' waiting for you', style.AMBAR)}" if s["needs_you"] else "") + (f" · {s['runnable']} ready to run" if s["runnable"] else ""), "",
+              style.heading("Next")]
+    if s["needs_you"]:
+        lines.append(style.command("caos-harness task list", "what is open, in the order it needs you"))
+        lines.append(style.command('caos-harness review <id> ok "why"', "accept, or redo | verify | superseded"))
+    if s["runnable"]:
+        lines.append(style.command("caos-harness run", f"send {word(s['runnable'], 'task', 'tasks')} to their agents"))
+    if not s["tasks"]:
+        lines.append(style.command('caos-harness task add "…" --queue <agent>', "put the first task on the board"))
+    lines += [style.command("caos-harness serve", "the desk, at http://127.0.0.1:8791"), style.command("caos-harness help", "every command"), ""]
+    return "\n".join(lines)
+
+
 def short(text: str, n: int = 72) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
@@ -68,12 +96,20 @@ def work(cmd: str, rest: list[str]) -> int:
                 tid, queue, why = app.add_task(p, text[0], opt.get("--queue"), opt.get("--skill"), opt.get("--tier"))
                 print(f"task {tid} -> {queue} ({why})")
             elif sub == "list":
-                rows = b.conn.execute("SELECT * FROM tasks" + ("" if "--all" in args else " WHERE status IN ('pending','sending') OR (status='sent' AND (review IS NULL OR review='verify'))") + " ORDER BY id").fetchall()
+                rows = [r for r in b.conn.execute("SELECT * FROM tasks ORDER BY id").fetchall() if "--all" in args or app.task_state(r) not in ("ok", "superseded", "discarded")]
+                order = ["to_review", "verify", "person", "sending", "pending", "returned", "sent", "ok", "superseded", "discarded"]
+                rows.sort(key=lambda r: (order.index(app.task_state(r)), -r["id"]))
+                tty = style.enabled()
+                if rows and tty:
+                    print(style.dim(f"{'id':>4}  {'state':<15} {'queue':<12} task"))
                 for r in rows:
-                    state = r["status"] if r["status"] != "sent" else ("delivered, to review" if r["result"] is not None and not r["review"] else (r["review"] or "sent"))
-                    print(f"{style.paint(format(r['id'], '>4'), style.TENUE)}  {style.state(state, person=r['queue'] == app.PERSON)} {style.paint(format(r['queue'] or '-', '<12'), style.GRIS)} {short(r['text'])}")
+                    key = app.task_state(r)
+                    print(f"{style.paint(format(r['id'], '>4'), style.TENUE)}  {style.state(key)} {style.paint(format(app.PERSON if key == 'person' else (r['queue'] or '-'), '<12'), style.GRIS)} {short(r['text'])}")
                 if not rows:
                     print("nothing open")
+                elif tty:
+                    waiting = sum(app.task_state(r) in ("to_review", "verify", "person") for r in rows)
+                    print(style.dim(f"\n{len(rows)} shown" + (f" · {waiting} waiting for you" if waiting else "") + ("" if "--all" in args else " · --all adds the closed ones")))
             elif sub == "show" and args:
                 r = b.get(int(args[0]))
                 if not r:
@@ -111,13 +147,20 @@ def work(cmd: str, rest: list[str]) -> int:
             if "--json" in rest or not sys.stdout.isatty():
                 print(json.dumps(st, indent=2))
                 return 0
-            from . import style
             print(style.banner())
-            print(f"\n{st['tasks']} tasks · {st['returned_at_least_once']} returned at least once\n")
+            sm = app.summary(p)
+            print(f"\n{style.paint(p.root.name, style.HUESO, True)}  {st['tasks']} tasks · {st['returned_at_least_once']} returned at least once"
+                  + (f" · {style.paint(str(sm['needs_you']) + ' waiting for you', style.AMBAR)}" if sm["needs_you"] else "") + "\n")
             for label, n in sorted(st["by_status"].items(), key=lambda kv: -kv[1]):
-                print(f"  {style.state(label)} {n}")
+                print(f"  {style.paint(format(label, '<22'), style.GRIS)} {n:>3}")
+            print()
             for label, n in sorted(st["review"].items(), key=lambda kv: -kv[1]):
-                print(f"  {style.paint('review · ' + label, style.GRIS):<30} {n}")
+                print(f"  {style.paint(format('review · ' + label, '<22'), style.GRIS)} {n:>3}")
+            if st["by_agent"]:
+                print()
+                for label, n in sorted(st["by_agent"].items(), key=lambda kv: -kv[1]):
+                    print(f"  {style.paint(format('agent · ' + label, '<22'), style.GRIS)} {n:>3}")
+            print(style.dim("\n--json for the same numbers as data"))
             return 0
         if cmd == "chat":
             import threading
@@ -156,7 +199,10 @@ def work(cmd: str, rest: list[str]) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if not argv or argv[0] in ("-h", "--help", "help"):
+    if not argv:
+        print(home())
+        return 0
+    if argv[0] in ("-h", "--help", "help"):
         print(usage())
         return 0
     cmd, rest = argv[0], argv[1:]

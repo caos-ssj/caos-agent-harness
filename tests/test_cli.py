@@ -7,7 +7,7 @@ def run(*args):
 
 
 def test_help_lists_every_command():
-    out = run().stdout
+    out = run("help").stdout
     assert all(c in out for c in ("demo", "route", "eval", "regress", "mutation", "agent-eval", "skills", "trace"))
 
 
@@ -46,3 +46,29 @@ def test_colour_only_on_a_terminal_and_never_with_no_color(monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     assert style.paint("x", style.AMBAR, stream=Tty()) == "x"
     assert "\x1b" not in run().stdout and "caos · harness" in run().stdout   # a subprocess is not a terminal
+
+
+def cli(folder, *args):
+    import os
+    from pathlib import Path
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent.parent)}
+    env.pop("NO_COLOR", None)
+    return subprocess.run([sys.executable, "-m", "caos_harness", *args], capture_output=True, text=True, cwd=folder, env=env)
+
+
+def test_entry_screen_guides_a_folder_with_and_without_a_project(tmp_path):
+    out = cli(tmp_path).stdout
+    assert "No project in this folder" in out and "caos-harness init" in out and "\x1b" not in out
+    cli(tmp_path, "init")
+    out = cli(tmp_path).stdout
+    assert "0 tasks" in out and "task add" in out
+
+
+def test_task_list_uses_the_dashboards_words_and_orders_by_what_needs_you(tmp_path):
+    cli(tmp_path, "init")
+    cli(tmp_path, "task", "add", "first", "--queue", "echo")
+    cli(tmp_path, "task", "add", "second", "--queue", "person")
+    out = cli(tmp_path, "task", "list").stdout.splitlines()
+    assert "with a person" in out[0] and "second" in out[0] and "pending" in out[1]   # a person's task needs you before a pending one
+    assert "\x1b" not in "".join(out)                                                  # piped: no colour, no header
+    assert "1 waiting for you" in cli(tmp_path).stdout

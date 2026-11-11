@@ -165,3 +165,21 @@ def run_pending(p: Project, only: str | None = None, dispatcher: CommandDispatch
             p.board.deliver(t["id"], d.outputs.pop(agent, ""))
         done.append({"id": t["id"], "agent": agent, "ok": res.ok, "reason": res.reason})
     return done
+
+
+def task_state(r) -> str:
+    """The state a row is in, in the words the dashboard uses (see `web.server.task_row`)."""
+    if r["status"] == "sent":
+        return r["review"] if r["review"] in ("ok", "superseded", "verify") else ("to_review" if r["result"] is not None else "sent")
+    if r["status"] == "pending":
+        return "person" if r["queue"] == PERSON else ("returned" if r["review"] == "redo" else "pending")
+    return r["status"]
+
+
+def summary(p: Project) -> dict:
+    """What the operator needs to know at a glance: counts only, no task text."""
+    rows = p.board.conn.execute("SELECT * FROM tasks").fetchall()
+    states = [task_state(r) for r in rows]
+    return {"tasks": len(rows), "needs_you": sum(s in ("to_review", "verify", "person") for s in states),
+            "to_review": sum(s in ("to_review", "verify") for s in states), "with_person": states.count("person"),
+            "runnable": sum(s in ("pending", "returned") for s in states), "agents": len(p.agents)}
