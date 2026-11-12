@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Task } from '../api'
 import { pad, stateLabel } from '../lib'
+import { useDialog, usePresence } from '../hooks'
 
 export interface PaletteItem { id: string; group: string; label: string; hint?: string; run: () => void }
 interface PaletteProps { open: boolean; onClose: () => void; items: PaletteItem[]; tasks: Task[]; onTask: (id: number) => void }
@@ -9,13 +10,9 @@ interface PaletteProps { open: boolean; onClose: () => void; items: PaletteItem[
 export const Palette: React.FC<PaletteProps> = ({ open, onClose, items, tasks, onTask }) => {
   const [q, setQ] = useState('')
   const [i, setI] = useState(0)
-  const input = useRef<HTMLInputElement>(null)
-  const back = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (open) { back.current = document.activeElement as HTMLElement; setQ(''); setI(0); setTimeout(() => input.current?.focus(), 0) }
-    else back.current?.focus?.()
-  }, [open])
+  const pres = usePresence(open, 140)
+  const box = useDialog<HTMLDivElement>(open, onClose, { modal: true, initial: 'input' })   // focus in, Tab kept inside, Escape closes, focus returns to the opener
+  useEffect(() => { if (open) { setQ(''); setI(0) } }, [open])
 
   const all = useMemo<PaletteItem[]>(() => [
     ...items,
@@ -28,7 +25,7 @@ export const Palette: React.FC<PaletteProps> = ({ open, onClose, items, tasks, o
   }, [q, all])
   useEffect(() => { setI(0) }, [q])
   useEffect(() => { document.getElementById(`pal-${i}`)?.scrollIntoView({ block: 'nearest' }) }, [i])
-  if (!open) return null
+  if (!pres.mounted) return null
 
   const go = (x?: PaletteItem) => { if (!x) return; onClose(); x.run() }
   const onKey = (e: React.KeyboardEvent) => {
@@ -40,10 +37,10 @@ export const Palette: React.FC<PaletteProps> = ({ open, onClose, items, tasks, o
   }
   let last = ''
   return (
-    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div className="scrim" data-leaving={pres.leaving ? '' : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="palette" ref={box} role="dialog" aria-modal="true" aria-label="Command palette">
         <input
-          ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey}
+          value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey}
           role="combobox" aria-expanded="true" aria-controls="pal-list" aria-activedescendant={shown[i] ? `pal-${i}` : undefined} aria-label="Search commands and tasks"
           placeholder="Go to a view, run something, or find a task"
         />

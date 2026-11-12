@@ -11,7 +11,10 @@ English: [README.md](README.md) · Diseño: [docs/ARCHITECTURE.md](docs/ARCHITEC
 ## Qué hay dentro
 | Módulo | Qué hace | Cómo se comprueba |
 |---|---|---|
-| `caos_harness/board` | Tablero: una cola por agente, reclamación atómica antes de enviar, solo a agentes en espera, un envío fallido vuelve a la cola y ningún encargo se cierra sin veredicto de revisión | `make demo`, `make test` |
+| `caos_harness/app.py` | Un proyecto es una carpeta con `harness.toml`; un agente es cualquier comando (stdin o `-p {prompt}`). `caos-harness init`, `task add`, `run` paralelo, `review`, `status` | `caos-harness --help` |
+| `caos_harness/orchestrator.py` | Orquestación multi-agente: un orquestador elegible (`claude`, `agy`, `codex`, `opencode`, Ollama) descompone el objetivo en subtareas editables, ejecuta lecturas en paralelo y ediciones en `git worktree` aislados, y entrega una síntesis | `caos-harness orchestrate "<objetivo>" --plan-only` |
+| `caos_harness/web` + `web/` | Panel local en 127.0.0.1 con SSE (`EventBus` / `EventSource`) y 6 vistas (`Console` con `Plan \| Act \| Orquestar`, `Board` padre/hija, `Models & Providers`, `Metrics`, `Skills & Tools`, `Share / Team`) sobre Obsidiana Cobre 60fps | `caos-harness serve` |
+| `caos_harness/board` | Tablero: una cola por agente, jerarquía `parent_id`, reclamación atómica antes de enviar, solo a agentes en espera, un envío fallido vuelve a la cola y ningún encargo se cierra sin veredicto de revisión | `make demo`, `make test` |
 | `caos_harness/router` | Elige el sistema medido más barato cuyo **límite inferior** de precisión cumple lo que exige el coste del error; si ninguno cumple, el encargo va a una persona | `make route` |
 | `caos_harness/memory` | Una sola conexión a la base de conocimiento por MCP (búsqueda con relevancia, lectura de una nota) | `make calibrate` |
 | `caos_harness/skills/` | Skills de rol (`coder`, `qa`, `writer`, `model-selection`): el encargo se envía con el puntero a su skill delante | `python -m caos_harness skills` |
@@ -55,23 +58,30 @@ El ciclo de vida es el del tablero con el que coordiné mis propios agentes de c
 
 ## Uso
 ```bash
-pip install -r requirements.txt
-make check        # 137 pruebas, umbrales, compuerta de regresión, demo del tablero y tabla del router
+pip install -e '.[dev]'
+make check        # 376 pruebas, umbrales, compuerta de regresión, demo del tablero y tabla del router
 make mutation     # 26/26 fallos inyectados detectados
+cd web && npm test && npm run build   # 35 pruebas de interfaz/SSE y bundle de producción
 python -m caos_harness            # todos los comandos
 ```
 ### El panel
 
-`caos-harness serve` abre el panel local (solo esta máquina) con cinco vistas: **Console** (modelo local con Ollama), **Board**, **Providers**, **Measured** y **Skills**. La interfaz está en inglés.
+`caos-harness serve` abre el panel local (solo esta máquina, actualizado en vivo por SSE con `EventBus` / `EventSource`) con seis vistas: **Console** (`Plan`, `Act` y `Orquestar`, con selector de motor `Ctrl+M`), **Board**, **Models & Providers**, **Metrics**, **Skills & Tools** y **Share / Team**. En **Orquestar**, puedes elegir el orquestador (`claude` por defecto, o `agy`, `codex`, `opencode`, `llama`, `qwen`), editar cada subtarea en la Mesa de Delegación Crítica (agente, skill, `Lectura (paralelo)` frente a `Edición (worktree)`, prompt y criterio de aceptación), ejecutar subagentes en paralelo y revisar la síntesis final y la jerarquía padre/hija en el tablero. La interfaz está en español sobre tema único **Obsidiana Cobre** optimizado para 60fps; los nombres de las vistas, en inglés.
 
-- **Board:** cuatro tarjetas de colas (quién tiene qué, con un punto por encargo abierto: ámbar si te espera) y los encargos agrupados en *Needs you*, *In motion* y *Closed*. Una fila se abre en su sitio con lo pedido, quién lo recibió y por qué, lo que volvió, la traza y los botones de veredicto. Un proyecto nuevo empieza con una guía de tres pasos que se marca sola según lo que hay en el tablero.
-- **Measured:** cuatro fichas con barras que muestran sus partes y el comando que las produjo, y el intervalo de precisión de cada sistema frente a la línea que pide cada costo de error.
-- **Teclas:** `⌘K` / `Ctrl+K`, `j` / `k`, `n`, `r`. **Preferencias:** densidad, tamaño de texto y vista inicial, guardadas en tu navegador.
-- **Datos de ejemplo:** `python3 tools/seed_demo.py /tmp/harness-demo`; la página los rotula «Sample data».
+También soporta CLI desde terminal: `caos-harness orchestrate "<objetivo>" [--orchestrator A] [--agents a,b,c] [--plan-only]`, además de `agy` (`-p {prompt}` sin shell) y `opencode` (`opencode/*-free`).
+
+- **Board:** sin nada seleccionado muestra lo que te espera, lo que está en curso y un registro de actividad con una línea en tu última visita; una fila se abre en su sitio con lo pedido, quién lo recibió y por qué, lo que volvió, el diff, la traza y los botones de veredicto (*Aceptar*, *Devolver*, *Pedir evidencia*, *Superada*, siempre con motivo). Con `Global` lista, solo lectura, los encargos abiertos de todos los proyectos registrados. Un proyecto nuevo empieza con la guía *Primeros pasos*.
+- **Workspaces:** el selector de proyecto, arriba en la barra lateral, alterna entre carpetas registradas en `~/.config/caos-harness/workspaces.json` (cada una con su tablero, trazas y sesiones en `.harness/`).
+- **Models & Providers:** todos los modelos de Ollama instalados en una tabla (peso, cuantización, precisión medida y su límite inferior), los proveedores de nube con su formulario de clave (guardada en `.harness/.env.local` con permisos 0600 o en el keyring, nunca en `harness.toml`), los agentes CLI (`claude -p`, `codex exec -`, `opencode`), el router, el failover y un comparador de dos motores. Entran al router solo cuando `make benchmark` los mide.
+- **Metrics:** cinco cifras, una tendencia dibujada con corridas reales y qué modelo responde cada costo de error. Las comparaciones se registran aparte y no cuentan como trabajo.
+- **Teclas:** `⌘K` / `Ctrl+K`, `Ctrl+M` (motor en Console); en Board `j` / `k`, `n`, `a`, `r`. *Ejecutar*, en la cabecera, corre lo pendiente. **Preferencias:** densidad, tamaño de texto, vista inicial, perfil de enrutamiento, animaciones e inspector, guardadas en tu navegador.
+- **Datos de ejemplo:** `python3 tools/seed_demo.py /tmp/harness-demo`; la cabecera muestra una etiqueta `demo`.
 
 ### La terminal
 
-`caos-harness` en una terminal abre una sesión interactiva: banner con colas y skills, lo que te espera y un prompt con línea de estado. Los comandos empiezan con `/` (`/task`, `/run`, `/review`, `/status`, `/skills`, `/serve`, `/help`, `/quit`), Tab completa, ↑ recupera el historial. Para scripts siguen los mismos comandos sin barra. Color solo en terminal real (nunca por tubería ni con `NO_COLOR`).
+`cd <proyecto> && caos-harness` abre una conversación a pantalla completa (`curses` estándar, sin dependencias externas): un agente trabaja en segundo plano con indicador de progreso en vivo, los pasos de herramientas y la salida aparecen al completarse el turno y cada comando propuesto espera aprobación. `Ctrl-P` elige agente de `harness.toml`, router por costo de error o modelo local Ollama (con lo medido al lado); `@archivo` adjunta archivos seguros de la carpeta; `Tab` alterna `plan ↔ act` (en `act` requiere `y` y `/commands on`); `Ctrl-B` abre el tablero con veredictos y detalle (`J`/`K` desplaza salidas largas); `Ctrl-S` reanuda sesiones guardadas en `.harness/tui/`; `/export` guarda Markdown; `/skin` (`night`, `ember`, `mono`) y `Ctrl-L` ajustan el aspecto.
+
+Para scripts sin pantalla: `caos-harness run "texto" --agent <nombre>` (y `status`, `task list`, `run`); `CAOS_TUI=0 caos-harness` abre el modo por líneas (`/task`, `/run`, `/review`, Tab e historial). Color solo en terminal real (nunca por tubería ni con `NO_COLOR`).
 
 La evaluación del agente necesita [Ollama](https://ollama.com) y una copia de caos-cerebro: `make agent-eval MODEL=qwen2.5:7b ENGINE=langgraph CEREBRO=/ruta/a/caos-cerebro`.
 

@@ -15,6 +15,7 @@ dependencies = []
 [project.optional-dependencies]
 mcp = ["mcp"]
 langgraph = ["langgraph"]
+keyring = ["keyring"]   # read an API key from the system keyring instead of an environment variable
 dev = ["pytest", "mcp", "langgraph"]
 
 [project.scripts]

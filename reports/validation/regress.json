@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "checked_at": "2026-11-11T23:44:29",
+  "current": {
+    "precision": 0.929,
+    "coverage": 0.424,
+    "n": 74
+  },
+  "baseline": {
+    "precision": 0.929,
+    "coverage": 0.424,
+    "n": 74
+  },
+  "regressions": []
+}

@@ -1,17 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bookmark, GripVertical, CheckCircle2, ChevronDown, Download, Search, ChevronRight, CircleSlash, Clock, Eye, Loader, Play, Plus, RotateCcw, ScanSearch, Send, UserRound, X } from 'lucide-react'
-import { api, Agent, RouterResponse, SkillInfo, StateResponse, Task, TaskDetail } from '../api'
-import { PageHead } from './PageHead'
-import { exportJson, exportMarkdown } from '../exportTrace'
-import { SavedView, useSavedViews } from '../views'
-import { CLOSED, NEEDS, age, byNeed, clock, group, isSpecialKey, pad, queueName, routeText, stateLabel } from '../lib'
+import {
+  CheckCircle2,
+  Columns3,
+  Download,
+  FileCode2,
+  List,
+  Play,
+  Plus,
+  RotateCcw,
+  ScanSearch,
+  Search,
+  X,
+} from 'lucide-react'
+import { Agent, api, GlobalBoardResponse, RouterResponse, StateResponse, Task, TaskDetail } from '../api'
+import { age, byNeed, CLOSED, clock, group, isSpecialKey, NEEDS, pad, queueName, stateLabel } from '../lib'
+import { Accordion } from './Accordion'
+import { ConfirmButton } from './ConfirmButton'
+import { DiffViewer } from './DiffViewer'
 import { FirstSteps } from './FirstSteps'
-
-/* The board. Lanes say who holds what and how much of it needs you; the list says what to do first; a row opens in
-   place with what was asked, what came back, the trace and the verdict. */
-
-const ICON: Record<string, React.ElementType> = { to_review: Eye, verify: ScanSearch, person: UserRound, sending: Loader, pending: Clock, returned: RotateCcw, sent: Send, ok: CheckCircle2, superseded: Archive, discarded: CircleSlash }
-const stateKey = (t: Task) => (t.state === 'pending' && t.review === 'redo' ? 'returned' : t.state)
+import { BoardOverview } from './BoardOverview'
+import { useFresh } from '../hooks'
+import { exportJson, exportMarkdown } from '../exportTrace'
 
 interface BoardProps {
   router: RouterResponse | null
@@ -23,360 +32,514 @@ interface BoardProps {
   runnable: number
   filter: string | null
   onFilter: (f: string | null) => void
-  newTaskSignal: number
+  newTaskSignal?: number
+  /** `global`: every registered project's open tasks, read only; a click opens that project. */
+  scope?: 'project' | 'global'
+  onOpenWorkspaceTask?: (path: string, id: number) => void
 }
 
-const StatePill: React.FC<{ t: Task }> = ({ t }) => {
-  const Icon = ICON[stateKey(t)] ?? Clock
-  return <span className={`pill ${group(t) === 'needs' ? 'needs' : group(t) === 'closed' ? 'closed' : 'moving'}`}><Icon aria-hidden="true" />{stateLabel(t)}</span>
+function extractDiffBlocks(text?: string | null): string {
+  if (!text) return ''
+  const matches = Array.from(text.matchAll(/```diff\n([\s\S]*?)```/g))
+  if (matches.length > 0) return matches.map((m) => m[1].trim()).join('\n\n')
+  if (/^diff --git\s/m.test(text)) return text
+  return ''
 }
 
-/* One form to add work: what, who gets it, and an optional skill. The router can choose, by what a wrong answer costs. */
-const NewTask: React.FC<{ router: RouterResponse | null; agents: Agent[]; skills: SkillInfo[]; tiers: string[]; onCreated: (id: number) => void; onClose: () => void; focus: number }> = ({ router, agents, skills, tiers, onCreated, onClose, focus }) => {
-  const [text, setText] = useState('')
-  const [who, setWho] = useState('')
-  const [skill, setSkill] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<{ msg: string; err?: boolean } | null>(null)
-  const field = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { field.current?.focus() }, [focus])
-  // Until the operator chooses, the default is the first agent this project defines; with none, the router decides.
-  const chosen = who || (agents.length ? `agent:${agents[0].name}` : tiers.length ? `tier:${tiers.includes('medium') ? 'medium' : tiers[0]}` : '')
-  const submit = async () => {
-    if (!text.trim() || busy) return
-    setBusy(true); setNote(null)
-    try {
-      const [kind, value] = chosen.split(':')
-      const res = await api.addTask({ text: text.trim(), skill: skill || undefined, ...(kind === 'tier' ? { tier: value } : { queue: value }) })
-      setText('')
-      setNote({ msg: `Added as task ${res.id} for ${queueName(res.queue)}. ${res.why.charAt(0).toUpperCase()}${res.why.slice(1)}.` })
-      onCreated(res.id)
-    } catch (e: any) { setNote({ msg: e.message || 'The board refused the task.', err: true }) } finally { setBusy(false) }
-  }
-  return (
-    <form className="card newtask" onSubmit={(e) => { e.preventDefault(); submit() }} aria-label="Add a task">
-      <h2>New task</h2>
-      <textarea ref={field} aria-label="Task" value={text} placeholder="Say what you need, in your own words. For example: check that the memory module reconnects after a failure, and report what you find."
-        onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if ((e.key === 'Enter' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); submit() } }} />
-      <div className="newtask-bar">
-        <select className="select" aria-label="Who gets it" value={chosen} onChange={(e) => setWho(e.target.value)}>
-          {agents.length > 0 && <optgroup label="An agent from harness.toml">{agents.map((a) => { const m = router?.profiles.find((p) => p.system === a.system); return <option key={a.name} value={`agent:${a.name}`}>{a.name}{a.system ? ` · ${a.system}` : ''}{m ? ` · lower bound ${(m.precision_lo * 100).toFixed(0)}%` : ''}</option> })}</optgroup>}
-          <optgroup label="The router decides, by what a wrong answer costs">{tiers.map((t) => { const r = router?.tiers.find((x) => x.tier === t); return <option key={t} value={`tier:${t}`}>cost of an error: {t}{r ? ` → ${r.action === 'route' ? r.system : 'a person'}` : ''}</option> })}</optgroup>
-          <optgroup label="Human review"><option value="agent:person">a person, no agent</option></optgroup>
-        </select>
-        <select className="select" aria-label="Skill to load first" value={skill} onChange={(e) => setSkill(e.target.value)}>
-          <option value="">no skill</option>
-          {skills.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
-        </select>
-        <span className="grow" />
-        <button type="button" className="btn btn-quiet" onClick={onClose}>Close</button>
-        <button type="submit" className="btn btn-primary" disabled={busy || !text.trim()}><Plus className="icon" aria-hidden="true" />{busy ? 'Adding…' : 'Add to the board'}</button>
-      </div>
-      <p className="note" style={{ color: 'var(--ink-3)', marginTop: 8 }}>⌘↵ adds it. It stays open until you review what comes back.</p>
-      {note && <p className={`note ${note.err ? 'err' : ''}`} role={note.err ? 'alert' : 'status'}>{note.msg}</p>}
-    </form>
-  )
-}
-
-export const Board: React.FC<BoardProps> = ({ router, state, selectedId, onSelect, onChanged, onRun, runnable, filter, onFilter, newTaskSignal }) => {
-  const [showClosed, setShowClosed] = useState(false)
-  const [scope, setScope] = useState<'all' | 'needs' | 'moving' | 'closed'>('all')
+export const Board: React.FC<BoardProps> = ({
+  router: _router,
+  state,
+  selectedId,
+  onSelect,
+  onChanged,
+  onRun,
+  runnable,
+  filter,
+  onFilter,
+  newTaskSignal,
+  scope: boardScope = 'project',
+  onOpenWorkspaceTask,
+}) => {
+  const [layout, setLayout] = useState<'list' | 'kanban'>(() => {
+    try { return localStorage.getItem('caos_board_layout') === 'kanban' ? 'kanban' : 'list' } catch { return 'list' }
+  })
   const [q, setQ] = useState('')
-  const [drag, setDrag] = useState<number | null>(null)
-  const [over, setOver] = useState<string | null>(null)
-  const [views, addView, removeView] = useSavedViews()
-  const [toast, setToast] = useState<string | null>(null)
-  const [naming, setNaming] = useState(false)
-  const [viewName, setViewName] = useState('')
+  const [scope, setScope] = useState<'all' | 'needs' | 'moving' | 'closed'>('all')
+  const [globalBoard, setGlobalBoard] = useState<GlobalBoardResponse | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const [newText, setNewText] = useState('')
+  const [newQueue, setNewQueue] = useState('')
   const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const [detailTab, setDetailTab] = useState<'delivery' | 'diff' | 'trace'>('delivery')
+  const [wsDiff, setWsDiff] = useState('')
   const [note, setNote] = useState('')
+  const [pickedNotes, setPickedNotes] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [stepsHidden, setStepsHidden] = useState(() => { try { return localStorage.getItem('caos_steps_hidden') === '1' } catch { return false } })
+  const [err, setErr] = useState<string | null>(null)
+  const [dragId, setDragId] = useState<number | null>(null)
+  const noteRef = useRef<HTMLInputElement>(null)
+
   const tasks = state?.tasks ?? []
-  const agents = state?.agents ?? []
+  const agents: Agent[] = state?.agents ?? []
   const now = state?.now ?? Date.now() / 1000
   const sel = tasks.find((t) => t.id === selectedId) ?? null
-  const sig = sel ? `${sel.state}:${sel.review}:${sel.delivered}:${sel.queue}` : ''
 
   useEffect(() => { if (newTaskSignal) setShowNew(true) }, [newTaskSignal])
-  useEffect(() => { setNote(''); setError(null) }, [selectedId])
   useEffect(() => {
-    if (selectedId == null) return setDetail(null)
-    let live = true
-    api.getTask(selectedId).then((d) => live && setDetail(d)).catch((e) => live && setError(e.message))
-    return () => { live = false }
-  }, [selectedId, sig])
-  // A task that is being sent shows its trace growing: a short poll while it is open.
+    if (boardScope !== 'global') return
+    let alive = true
+    const load = () => api.getGlobalBoard().then((g) => { if (alive) setGlobalBoard(g) }).catch(() => undefined)
+    void load()
+    const t = window.setInterval(load, 10000)
+    return () => { alive = false; window.clearInterval(t) }
+  }, [boardScope])
+  useEffect(() => { setNote(''); setPickedNotes([]); setErr(null); setDetailTab('delivery') }, [selectedId])
   useEffect(() => {
-    if (selectedId == null || sel?.state !== 'sending') return
-    const t = window.setInterval(() => { api.getTask(selectedId).then(setDetail).catch(() => undefined) }, 1500)
-    return () => window.clearInterval(t)
-  }, [selectedId, sel?.state])
+    if (selectedId == null) { setDetail(null); return }
+    api.getTask(selectedId).then(setDetail).catch((e) => setErr(e.message))
+  }, [selectedId, sel?.state, sel?.review, sel?.delivered])
+  useEffect(() => {
+    if (selectedId != null && detailTab === 'diff') {
+      api.getWorkspaceDiff().then((d) => setWsDiff(d.diff || '')).catch(() => setWsDiff(''))
+    }
+  }, [selectedId, detailTab])
 
-  const open = useMemo(() => tasks.filter((t) => !CLOSED.has(t.state)), [tasks])
-  type Lane = { id: string; title: string; art: string; kind: 'agent' | 'person' | 'review'; model: string | null; precision: number | null; lower: number | null; serves: string[]; live: boolean; items: Task[]; due: boolean; blurb: string }
-  const lanes = useMemo<Lane[]>(() => [
-    ...agents.map((a): Lane => {
-      const m = router?.profiles.find((p) => p.system === a.system)
-      return { id: a.name, title: a.name, art: 'board', kind: 'agent', model: a.system || null, precision: m?.precision ?? null, lower: m?.precision_lo ?? null, serves: (router?.tiers ?? []).filter((t) => t.agent === a.name).map((t) => t.tier), live: a.working > 0, items: open.filter((t) => t.queue === a.name), due: false, blurb: a.system ? '' : `runs ${a.command}` }
-    }),
-    { id: 'person', title: 'A person', art: 'person', kind: 'person', model: null, precision: null, lower: null, serves: (router?.tiers ?? []).filter((t) => t.action !== 'route').map((t) => t.tier), live: false, items: open.filter((t) => t.state === 'person'), due: true, blurb: 'Decides what no measured model is reliable enough for.' },
-    { id: 'review', title: 'To review', art: 'review', kind: 'review', model: null, precision: null, lower: null, serves: [], live: false, items: open.filter((t) => t.state === 'to_review' || t.state === 'verify'), due: true, blurb: 'Delivered by an agent. Nothing closes until you give a verdict.' },
-  ], [open, agents, router])
-  const agentLanes = lanes.filter((l) => l.kind === 'agent')
-  const waitLanes = lanes.filter((l) => l.kind !== 'agent')
+  const switchLayout = (next: 'list' | 'kanban') => {
+    setLayout(next)
+    try { localStorage.setItem('caos_board_layout', next) } catch { /* ignore */ }
+  }
 
   const rows = useMemo(() => {
-    const pick = (t: Task) => (filter === 'needs' ? NEEDS.has(t.state) : filter === 'person' ? t.state === 'person' : filter === 'review' ? t.state === 'to_review' || t.state === 'verify' : filter ? t.queue === filter : true)
+    const pick = (t: Task) =>
+      filter === 'needs' ? NEEDS.has(t.state)
+        : filter === 'person' ? t.state === 'person'
+          : filter === 'review' ? t.state === 'to_review' || t.state === 'verify'
+            : filter ? t.queue === filter : true
     const term = q.trim().toLowerCase()
-    const hit = (t: Task) => !term || t.text.toLowerCase().includes(term) || String(t.id) === term.replace(/^#/, '') || queueName(t.queue).toLowerCase().includes(term)
+    const hit = (t: Task) => !term || t.text.toLowerCase().includes(term) || String(t.id) === term.replace(/^#/, '') || t.queue.toLowerCase().includes(term)
     const inScope = (t: Task) => scope === 'all' || group(t) === scope
     return [...tasks].filter(pick).filter(hit).filter(inScope).sort(byNeed)
   }, [tasks, filter, q, scope])
-  const needs = rows.filter((t) => group(t) === 'needs')
-  const moving = rows.filter((t) => group(t) === 'moving')
-  const closed = rows.filter((t) => group(t) === 'closed')
-  const flat = [...needs, ...moving, ...(showClosed ? closed : [])]
-  const ever = tasks.some((t) => t.review)
-  const showSteps = tasks.length === 0 || (!ever && !stepsHidden)
 
-  // j / k move through the list, n writes a task, Esc closes the open row.
+  // Orchestration: a task that split into subtasks says how many of them are in; a subtask points at the one that split it.
+  const kids = useMemo(() => {
+    const m = new Map<number, Task[]>()
+    for (const t of tasks) if (t.parent_id != null) m.set(t.parent_id, [...(m.get(t.parent_id) ?? []), t])
+    return m
+  }, [tasks])
+  const groupLabel = (id: number): string | null => {
+    const k = kids.get(id)
+    if (!k?.length) return null
+    const ready = k.filter((c) => c.delivered || c.state === 'ok' || c.state === 'superseded').length
+    return `${ready}/${k.length} listas`
+  }
+
+  const openRows = useMemo(() => rows.filter((t) => !CLOSED.has(t.state)), [rows])
+  const closedRows = useMemo(() => rows.filter((t) => CLOSED.has(t.state)), [rows])
+  const freshIds = useFresh(openRows.map((t) => t.id))
+
+  const kanbanCols = useMemo(() => ({
+    pending: openRows.filter((t) => t.state === 'pending'),
+    moving: openRows.filter((t) => t.state === 'sending' || t.state === 'sent' || t.state === 'redo'),
+    review: openRows.filter((t) => t.state === 'to_review' || t.state === 'verify'),
+    person: openRows.filter((t) => t.state === 'person'),
+  }), [openRows])
+
+  const verdict = async (id: number, v: 'ok' | 'redo' | 'verify' | 'superseded', quickReason?: string) => {
+    const full = (quickReason || [note.trim(), ...pickedNotes.map((n) => `“${n}”`)].filter(Boolean).join(' · ')).trim()
+    if ((v === 'redo' || v === 'ok') && !full) {
+      setErr(v === 'ok' ? 'Indica un motivo breve para aceptar.' : 'Indica qué corregir al devolver.')
+      noteRef.current?.focus()
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    try {
+      await api.reviewTask(id, v, full || undefined)
+      setNote('')
+      setPickedNotes([])
+      onChanged()
+      const next = openRows.find((t) => t.id !== id && NEEDS.has(t.state))
+      onSelect(next ? next.id : null)
+    } catch (e: any) {
+      setErr(e.message || 'No se pudo registrar el veredicto')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isSpecialKey(e)) return
-      const i = flat.findIndex((t) => t.id === selectedId)
-      if (e.key === 'j') { const n = flat[Math.min(flat.length - 1, i + 1)]; if (n) onSelect(n.id) }
-      else if (e.key === 'k') { const n = flat[Math.max(0, i - 1)]; if (n) onSelect(n.id) }
+      const i = openRows.findIndex((t) => t.id === selectedId)
+      if (e.key === 'j') { const n = openRows[Math.min(openRows.length - 1, i + 1)]; if (n) onSelect(n.id) }
+      else if (e.key === 'k') { const n = openRows[Math.max(0, i - 1)]; if (n) onSelect(n.id) }
       else if (e.key === 'n') { e.preventDefault(); setShowNew(true) }
+      else if (e.key === 'a' && sel && (sel.state === 'to_review' || sel.state === 'verify')) { void verdict(sel.id, 'ok', 'Revisado con j/k/a') }
+      else if (e.key === 'r' && sel && (sel.state === 'to_review' || sel.state === 'verify')) { e.preventDefault(); noteRef.current?.focus() }
       else if (e.key === 'Escape') onSelect(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [flat, selectedId])
-  useEffect(() => { document.querySelector('.task.open')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [selectedId])
+  }, [openRows, selectedId, sel])
 
-  const act = async (fn: () => Promise<unknown>, id: number) => {
-    setBusy(true); setError(null)
-    try { await fn(); setNote(''); onChanged(); const next = needs.find((t) => t.id !== id); onSelect(next ? next.id : null) }
-    catch (e: any) { setError(e.message || 'The board refused that action.') } finally { setBusy(false) }
+  const createTask = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newText.trim()) return
+    const targetQ = newQueue || agents[0]?.name || 'person'
+    const res = await api.addTask({ text: newText.trim(), queue: targetQ })
+    setNewText('')
+    setShowNew(false)
+    onChanged()
+    onSelect(res.id)
   }
-  useEffect(() => { if (!toast) return; const t = window.setTimeout(() => setToast(null), 4500); return () => window.clearTimeout(t) }, [toast])
-  const move = async (id: number, queue: string) => {
-    setToast(null)
-    if (tasks.find((t) => t.id === id)?.queue === queue) { setDrag(null); return }   // dropped on its own queue: nothing to do
-    try { await api.moveTask(id, queue); onChanged(); setToast(`Task ${pad(id)} moved to ${queueName(queue)}.`) }
-    catch (e: any) { setToast(e.message || 'That task cannot be moved.') }
-  }
-  const movable = (t: Task) => t.state === 'pending' || t.state === 'person'
-  const verdict = (id: number, v: 'ok' | 'redo' | 'verify' | 'superseded') => {
-    if (v === 'redo' && !note.trim()) return setError('A returned task needs a note: say what to fix.')
-    return act(() => api.reviewTask(id, v, note.trim() || undefined), id)
-  }
-  const hideSteps = () => { setStepsHidden(true); try { localStorage.setItem('caos_steps_hidden', '1') } catch { /* ignore */ } }
 
-  const row = (t: Task, i: number) => {
+  const moveToQueue = async (id: number, targetQueue: string) => {
+    setDragId(null)
+    try {
+      await api.moveTask(id, targetQueue)
+      onChanged()
+    } catch (e: any) {
+      setErr(e.message || 'No se pudo mover la tarea')
+    }
+  }
+
+  const renderCompactRow = (t: Task) => {
     const isOpen = t.id === selectedId
-    const d = isOpen && detail && detail.id === t.id ? detail : null
-    const routerWhy = d?.timeline.find((e) => e.source === 'router' && e.reason)?.reason
     const reviewable = t.state === 'to_review' || t.state === 'verify'
     return (
-      <div key={t.id} className={`task ${isOpen ? 'open' : ''} ${group(t)} ${t.state} ${drag === t.id ? 'dragging' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 22}ms` }}
->
-        {movable(t) && <span className="grip" draggable title="Drag onto a queue card to move this task" aria-hidden="true" onDragStart={(e) => { setDrag(t.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(t.id)); const row = (e.currentTarget.parentElement as HTMLElement); e.dataTransfer.setDragImage(row, 20, 20) }} onDragEnd={() => { setDrag(null); setOver(null) }}><GripVertical className="icon" aria-hidden="true" /></span>}
-        <button type="button" className="task-row" aria-expanded={isOpen} onClick={() => onSelect(isOpen ? null : t.id)}>
-          <span className="task-id">{pad(t.id)}</span>
-          <span className="task-title">{t.text}</span>
-          <span className="pill-cell"><StatePill t={t} /></span>
-          <span className="task-age" title={new Date(t.created * 1000).toLocaleString('en-US')}>{age(t.created, now)}</span>
-          <ChevronRight className="icon chev" aria-hidden="true" />
-          <span className="task-sub">{t.router ? <span>For <b>{queueName(t.queue)}</b>: the router chose <span className="mono">{t.router.action === 'route' ? t.router.system : 'a person'}</span> for cost of error “{t.router.tier}”</span> : t.queue === 'person' ? <span>Sent to <b>a person</b> by you</span> : <span>Assigned to <b>{queueName(t.queue)}</b> by you</span>}</span>
+      <div
+        key={t.id}
+        draggable={t.state === 'pending' || t.state === 'person'}
+        onDragStart={() => setDragId(t.id)}
+        className={`board-row ${isOpen ? 'is-open' : ''} ${NEEDS.has(t.state) ? 'is-needs' : ''} ${freshIds.has(t.id) ? 'fresh' : ''}`}
+      >
+        <button type="button" className="board-row-main" onClick={() => onSelect(isOpen ? null : t.id)}>
+          <span className="mono muted">#{pad(t.id)}</span>
+          <span className="mono muted age-col">{age(t.created, now)}</span>
+          <span className={`pill-mini ${NEEDS.has(t.state) ? 'amber' : t.state === 'ok' ? 'sage' : t.state === 'redo' ? 'coral' : 'steel'}`}>
+            {stateLabel(t)}
+          </span>
+          <span className="board-row-title">
+            {t.parent_id != null && <span className="group-badge child" title={`Subtarea de #${pad(t.parent_id)}`}>↳ #{pad(t.parent_id)}</span>}
+            {groupLabel(t.id) && <span className="group-badge parent" title="Subtareas entregadas de esta orquestación">{groupLabel(t.id)}</span>}
+            {t.text}
+          </span>
+          <span className="mono muted queue-col">{t.router?.system || queueName(t.queue)}</span>
         </button>
-        {isOpen && (
-          <div className="detail">
-            <div className="detail-grid">
-              <section>
-                <h3>Asked</h3>
-                <p className="body">{t.text}</p>
-                <h3>Who got it</h3>
-                <p className="body"><b style={{ fontWeight: 600 }}>{queueName(t.queue)}</b>{t.router ? `, by the router: ${routeText(t)}` : t.queue === 'person' ? ', by your choice' : ', picked by you'}{t.skill ? `. Skill: ${t.skill}.` : '.'}</p>
-                {routerWhy && <p className="muted" style={{ marginTop: 4 }}>{routerWhy.charAt(0).toUpperCase() + routerWhy.slice(1)}.</p>}
-                <h3>Delivered</h3>
-                {d?.result != null ? <pre className="delivered">{d.result || '(the agent printed nothing)'}</pre>
-                  : <p className="muted">{t.state === 'person' ? 'Waiting for a person. The trace says why the router sent it here.' : 'Nothing delivered yet. Run the pending tasks to send it to its agent.'}</p>}
-                {t.review_note && <p className="reviewer-note">Reviewer’s note: {t.review_note}</p>}
-                {movable(t) && (
-                  <p className="move-row"><label htmlFor={`mv-${t.id}`}>Move to</label>
-                    <select id={`mv-${t.id}`} className="select" value={t.queue} onChange={(e) => move(t.id, e.target.value)}>
-                      {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}<option value="person">a person</option>
-                    </select><span className="mute">or drag the row onto a queue card.</span></p>
-                )}
-              </section>
-              <section>
-                <div className="h-row"><h3>Trace</h3>{t.state === 'sending' && <span className="live-tag"><i className="live" aria-hidden="true" />live</span>}
-                  {d && <span className="exports"><button type="button" className="btn btn-quiet btn-sm" onClick={() => exportMarkdown(d)}><Download className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Markdown</button><button type="button" className="btn btn-quiet btn-sm" onClick={() => exportJson(d)}>JSON</button></span>}
-                </div>
-                {!d && !error && <p className="muted">Reading the trace…</p>}
-                {d && (
-                  <ol className="trace">
-                    {d.timeline.map((e, n) => (
-                      <li key={e.seq} className={e.source} style={{ ['--i' as any]: Math.min(n, 8) }}>
-                        <span className="src">{e.source}</span>
-                        <span className="what">{e.status || e.kind}{e.name ? ` · ${e.name}` : ''}</span>
-                        <span className="at">{clock(e.ts)}</span>
-                        {e.reason && <span className="why">{e.reason}</span>}
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </section>
-            </div>
-            {(reviewable || t.state === 'pending' || t.state === 'person') && (
-              <div className="verdict">
-                {reviewable ? (
-                  <>
-                    <input className="field" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why? A note is required when you return it" aria-label="Note for the verdict" />
-                    <div className="verdict-row">
-                      <button type="button" className="btn btn-primary" disabled={busy} onClick={() => verdict(t.id, 'ok')}><CheckCircle2 className="icon" aria-hidden="true" />Accept</button>
-                      <button type="button" className="btn" disabled={busy} onClick={() => verdict(t.id, 'redo')}><RotateCcw className="icon" aria-hidden="true" />Return with note</button>
-                      {t.state !== 'verify' && <button type="button" className="btn" disabled={busy} onClick={() => verdict(t.id, 'verify')}><ScanSearch className="icon" aria-hidden="true" />Needs evidence</button>}
-                      <span className="spacer" />
-                      <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => verdict(t.id, 'superseded')}>Superseded</button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="verdict-row"><span style={{ color: 'var(--ink-2)' }}>Still in the queue.</span><span className="spacer" /><button type="button" className="btn btn-quiet" disabled={busy} onClick={() => act(() => api.discardTask(t.id), t.id)}><X className="icon" aria-hidden="true" />Discard</button></div>
-                )}
-                {error && <p className="verdict-err" role="alert">{error}</p>}
-              </div>
-            )}
-            {error && !(reviewable || t.state === 'pending' || t.state === 'person') && <p className="verdict-err" role="alert">{error}</p>}
-          </div>
-        )}
+        <div className="board-row-hover">
+          <button type="button" className="btn btn-quiet btn-xs" onClick={() => onSelect(isOpen ? null : t.id)}>
+            {isOpen ? 'Cerrar' : 'Abrir'}
+          </button>
+          {reviewable && (
+            <button type="button" className="btn btn-xs btn-sage" onClick={() => verdict(t.id, 'ok', 'Aprobado rápido')}>
+              Aceptar
+            </button>
+          )}
+        </div>
       </div>
     )
   }
 
-  const laneCard = (l: Lane) => (
-    <button key={l.id} type="button" className={`lane ${l.due && l.items.length ? 'due' : ''} ${over === l.id ? 'drop' : ''}`} aria-pressed={filter === l.id} onClick={() => onFilter(filter === l.id ? null : l.id)}
-      onDragOver={(e) => { if (drag != null && l.kind !== 'review') { e.preventDefault(); setOver(l.id) } }} onDragLeave={() => setOver((o) => (o === l.id ? null : o))}
-      onDrop={(e) => { e.preventDefault(); if (drag != null && l.kind !== 'review') move(drag, l.kind === 'person' ? 'person' : l.id); setDrag(null); setOver(null) }}>
-      <img src={`/art/${l.art}.svg`} alt="" aria-hidden="true" className="lane-art" />
-      <span className="lane-head"><span className="lane-name">{l.title}</span><span className="lane-count" aria-label={`${l.items.length} open`}>{l.items.length}</span></span>
-      {l.kind === 'agent' && (
-        <dl className="kv">
-          <div><dt>Model</dt><dd>{l.model ? <b className="mono">{l.model}</b> : <span className="mute">{l.blurb}</span>}</dd></div>
-          {l.model && <div><dt>Measured</dt><dd>{l.precision != null ? <><b>{(l.precision * 100).toFixed(1)}%</b> precise, at least <b>{(l.lower! * 100).toFixed(1)}%</b> sure</> : <span className="mute">not measured</span>}</dd></div>}
-          <div><dt>Router sends</dt><dd>{l.serves.length ? <>cost of error <b>{l.serves.join(', ')}</b></> : <span className="mute">nothing: only tasks you give it by name</span>}</dd></div>
-        </dl>
-      )}
-      {l.kind !== 'agent' && (
-        <p className="lane-blurb">{l.blurb}{l.kind === 'person' && l.serves.length > 0 && <> The router sends it cost of error <b>{l.serves.join(', ')}</b>.</>}</p>
-      )}
-      <span className="lane-foot">
-        <span className="dots" aria-hidden="true">
-          {l.items.slice(0, 12).map((t) => <i key={t.id} className={NEEDS.has(t.state) ? 'needs' : 'moving'} />)}
-          {l.items.length > 12 && <em>+{l.items.length - 12}</em>}
-          {l.items.length === 0 && <em className="lane-empty"><img src="/art/empty.svg" alt="" aria-hidden="true" />no open tasks</em>}
-        </span>
-        {l.live && <span className="lane-live"><i className="live" aria-hidden="true" />sending now</span>}
-      </span>
-    </button>
-  )
-
-  let idx = 0
-  return (
-    <div className="page"><div className="page-inner">
-      <PageHead title="Board" art="workspace" lead="Each card is an agent, a person, or the review queue. The dots are its open tasks; below them, the tasks, with what needs you first.">
-          <button type="button" className="btn" onClick={onRun} disabled={!!state?.running || runnable === 0}><Play className="icon" style={{ width: 15, height: 15 }} fill="currentColor" aria-hidden="true" />{state?.running ? 'Running…' : runnable ? `Run ${runnable} pending` : 'Nothing to run'}</button>
-          <button type="button" className="btn btn-primary" aria-expanded={showNew} onClick={() => setShowNew(!showNew)}><Plus className="icon" aria-hidden="true" />New task</button>
-      </PageHead>
-
-      {showNew && <NewTask router={router} agents={agents} skills={state?.skills ?? []} tiers={state?.tiers ?? ['low', 'medium', 'high', 'critical']} focus={newTaskSignal} onClose={() => setShowNew(false)} onCreated={(id) => { onChanged(); onSelect(id); if (filter) onFilter(null) }} />}
-      {showSteps && <FirstSteps tasks={tasks} agents={agents} runnable={runnable} running={!!state?.running} onAdd={() => setShowNew(true)} onRun={onRun} onDismiss={tasks.length ? hideSteps : undefined} />}
-
-      {needs.length > 0 && !filter && (
-        <div className="card nextup">
-          <div className="nextup-text"><b>{pad(needs[0].id)} · {needs[0].text}</b><span className="mute">Next for you · {stateLabel(needs[0])}{needs.length > 1 ? ` · ${needs.length - 1} more waiting below` : ''}</span></div>
-          <button type="button" className="btn btn-primary" onClick={() => onSelect(needs[0].id)}>Open task {pad(needs[0].id)}<ChevronRight className="icon" aria-hidden="true" /></button>
+  const renderDetailPane = (t: Task) => {
+    const d = detail && detail.id === t.id ? detail : null
+    const reviewable = t.state === 'to_review' || t.state === 'verify'
+    const deliveryDiff = extractDiffBlocks(d?.result)
+    return (
+      <section className="card split-detail" aria-label={`Detalle tarea #${pad(t.id)}`}>
+        <div className="split-detail-head">
+          <div>
+            <span className="mono muted">#{pad(t.id)} · {queueName(t.queue)}</span>
+            {t.parent_id != null && <button type="button" className="group-badge child linkish" onClick={() => onSelect(t.parent_id)} title="Ir a la tarea que la repartió">↳ subtarea de #{pad(t.parent_id)}</button>}
+            {groupLabel(t.id) && <span className="group-badge parent">{groupLabel(t.id)}</span>}
+            <h3>{t.text}</h3>
+            {t.criteria && <p className="criteria-line"><span className="mono">Criterio</span> {t.criteria}</p>}
+            {t.worktree_key && <p className="mono muted criteria-line">worktree {t.worktree_key}</p>}
+            {(kids.get(t.id) ?? []).length > 0 && (
+              <ul className="kids-list" aria-label="Subtareas">
+                {kids.get(t.id)!.map((c) => (
+                  <li key={c.id}><button type="button" className="linkish" onClick={() => onSelect(c.id)}><span className="mono">#{pad(c.id)}</span> {queueName(c.queue)} · {stateLabel(c)}</button></li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="seg" role="tablist" aria-label="Inspección">
+            <button type="button" role="tab" aria-selected={detailTab === 'delivery'} onClick={() => setDetailTab('delivery')}>Entrega</button>
+            <button type="button" role="tab" aria-selected={detailTab === 'diff'} onClick={() => setDetailTab('diff')}><FileCode2 className="icon" style={{ width: 12, height: 12 }} />Diff</button>
+            <button type="button" role="tab" aria-selected={detailTab === 'trace'} onClick={() => setDetailTab('trace')}>Traza ({d?.timeline.length ?? 0})</button>
+          </div>
+          <button type="button" className="btn btn-quiet btn-icon btn-xs" onClick={() => onSelect(null)} aria-label="Cerrar detalle"><X className="icon" style={{ width: 14, height: 14 }} /></button>
         </div>
-      )}
 
-      <div className="lane-groups">
-        <section aria-labelledby="g-agents">
-          <div className="lane-group-head"><h2 id="g-agents">Agents</h2><span>who works the tasks, and which model each one runs</span></div>
-          <div className="lanes" role="group" aria-label="Agent queues">{agentLanes.map((l) => laneCard(l))}</div>
-        </section>
-        <section aria-labelledby="g-wait">
-          <div className="lane-group-head"><h2 id="g-wait">Waiting for you</h2><span>what only you can move forward</span></div>
-          <div className="lanes" role="group" aria-label="Queues that wait for you">{waitLanes.map((l) => laneCard(l))}</div>
-        </section>
-      </div>
-      <div className="legend-line" aria-hidden="true"><span><i style={{ background: 'var(--warm)' }} />needs you</span><span><i style={{ border: '1.5px solid var(--ink-2)' }} />in motion</span><span>Click a card to show only its tasks.</span></div>
-      {filter && <div className="filter-bar"><span>Showing only: <b>{filter === 'needs' ? 'what needs you' : filter === 'review' ? 'to review' : filter === 'person' ? 'a person' : filter}</b></span><button type="button" className="btn btn-quiet btn-sm" onClick={() => onFilter(null)}><X className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Show everything</button></div>}
+        {detailTab === 'delivery' && (
+          <div className="split-detail-body">
+            <pre className="delivered">{d?.result ?? (t.state === 'person' ? 'Esperando decisión humana.' : 'Sin entrega todavía.')}</pre>
+            {t.review_note && <p className="reviewer-note">Nota previa: {t.review_note}</p>}
+          </div>
+        )}
 
-      {drag != null && (
-        <div className="dropbar" role="group" aria-label="Drop the task on a queue">
-          <span>Move task {pad(drag)} to</span>
-          {[...agents.map((a) => ({ id: a.name, label: a.name })), { id: 'person', label: 'a person' }].map((qq) => (
-            <button key={qq.id} type="button" className={over === `bar-${qq.id}` ? 'drop' : ''}
-              onDragOver={(e) => { e.preventDefault(); setOver(`bar-${qq.id}`) }} onDragLeave={() => setOver(null)}
-              onDrop={(e) => { e.preventDefault(); move(drag, qq.id); setDrag(null); setOver(null) }}>{qq.label}</button>
-          ))}
+        {detailTab === 'diff' && (
+          <div className="split-detail-body">
+            <DiffViewer
+              diffText={deliveryDiff || wsDiff}
+              onAnnotateLine={reviewable ? (ln) => setPickedNotes((p) => (p.includes(ln) ? p : [...p, ln])) : undefined}
+              annotateLabel="Citar en Devolver"
+            />
+          </div>
+        )}
+
+        {detailTab === 'trace' && d && (
+          <div className="split-detail-body">
+            <div className="verdict-row" style={{ marginBottom: 8 }}>
+              <button type="button" className="btn btn-quiet btn-xs" onClick={() => exportMarkdown(d)}><Download className="icon" style={{ width: 12, height: 12 }} />MD</button>
+              <button type="button" className="btn btn-quiet btn-xs" onClick={() => exportJson(d)}>JSON</button>
+            </div>
+            <ol className="trace">
+              {d.timeline.map((e) => (
+                <li key={e.seq} className={e.source}>
+                  <span className="src">{e.source}</span>
+                  <span className="what">{e.status || e.kind}{e.name ? ` · ${e.name}` : ''}</span>
+                  <span className="at">{clock(e.ts)}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        {(reviewable || t.state === 'pending' || t.state === 'person') && (
+          <div className="verdict">
+            {pickedNotes.length > 0 && (
+              <div className="picked-chips">
+                {pickedNotes.map((pn, idx) => (
+                  <span key={idx} className="view-chip">
+                    {pn.slice(0, 48)}
+                    <button type="button" onClick={() => setPickedNotes((p) => p.filter((_, j) => j !== idx))}><X className="icon" style={{ width: 11, height: 11 }} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {reviewable ? (
+              <>
+                <input ref={noteRef} className="field field-sm" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Motivo o qué corregir…" aria-label="Motivo del veredicto" />
+                <div className="verdict-row">
+                  <button type="button" className="btn btn-primary btn-xs" disabled={busy} onClick={() => verdict(t.id, 'ok')}><CheckCircle2 className="icon" style={{ width: 13, height: 13 }} />Aceptar (a)</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => verdict(t.id, 'redo')}><RotateCcw className="icon" style={{ width: 13, height: 13 }} />Devolver</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => verdict(t.id, 'verify')}><ScanSearch className="icon" style={{ width: 13, height: 13 }} />Pedir evidencia</button>
+                  <span className="spacer" />
+                  <button type="button" className="btn btn-quiet btn-xs" disabled={busy} onClick={() => verdict(t.id, 'superseded')}>Superada</button>
+                </div>
+              </>
+            ) : (
+              <div className="verdict-row">
+                <span className="muted mono">Pendiente en cola {t.queue}</span>
+                <span className="spacer" />
+                <ConfirmButton className="btn btn-quiet btn-xs" question={`¿Descartar #${pad(t.id)}?`} confirmLabel="Descartar" onConfirm={() => api.discardTask(t.id).then(() => { onChanged(); onSelect(null) })}>
+                  Descartar
+                </ConfirmButton>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  const openGlobalTask = (path: string, current: boolean, id: number) => {
+    if (current) onSelect(id)
+    else onOpenWorkspaceTask?.(path, id)
+  }
+
+  const header = (
+    <div className="page-bar board-bar">
+      <h1>Board</h1>
+      <div className="page-bar-right">
+        {boardScope === 'global' && <span className="chip steel-chip" title="Lectura local de las bases de tareas de cada proyecto registrado">solo lectura · clic abre el proyecto</span>}
+        <div className="seg" role="group" aria-label="Vista Board">
+          <button type="button" aria-pressed={layout === 'list'} onClick={() => switchLayout('list')}><List className="icon" style={{ width: 13, height: 13 }} />Lista</button>
+          <button type="button" aria-pressed={layout === 'kanban'} onClick={() => switchLayout('kanban')}><Columns3 className="icon" style={{ width: 13, height: 13 }} />Kanban</button>
         </div>
-      )}
-      <div className="toolbar" role="search">
-        <label className="search-field"><Search className="icon" aria-hidden="true" /><input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks by words, number or queue" aria-label="Search tasks" /></label>
-        <div className="seg" role="group" aria-label="Show">
-          {(['all', 'needs', 'moving', 'closed'] as const).map((k) => <button key={k} type="button" aria-pressed={scope === k} onClick={() => { setScope(k); if (k === 'closed') setShowClosed(true) }}>{k === 'all' ? 'All' : k === 'needs' ? 'Needs you' : k === 'moving' ? 'In motion' : 'Closed'}</button>)}
-        </div>
-        {!naming ? (
-          <button type="button" className="btn btn-sm" disabled={!q.trim() && !filter && scope === 'all'} onClick={() => { setNaming(true); setViewName('') }} title="Keep this combination of queue, scope and search under a name"><Bookmark className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />Save view</button>
-        ) : (
-          <form className="name-view" onSubmit={(e) => { e.preventDefault(); if (viewName.trim()) { addView({ name: viewName.trim().slice(0, 28), queue: filter, scope, q }); setNaming(false) } }}>
-            <input className="field" autoFocus value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this view" aria-label="Name this view" maxLength={28} />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={!viewName.trim()}>Save</button>
-            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setNaming(false)}>Cancel</button>
-          </form>
+        {runnable > 0 && boardScope === 'project' && (
+          <button type="button" className="btn btn-amber btn-sm" onClick={onRun} disabled={!!state?.running}>
+            <Play className="icon" style={{ width: 13, height: 13 }} fill="currentColor" />Ejecutar {runnable}
+          </button>
+        )}
+        {boardScope === 'project' && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowNew((v) => !v)}>
+            <Plus className="icon" style={{ width: 14, height: 14 }} />Nueva tarea
+          </button>
         )}
       </div>
-      {views.length > 0 && <div className="views" aria-label="Saved views">{views.map((v: SavedView) => <span key={v.name} className="view-chip"><button type="button" onClick={() => { onFilter(v.queue && (v.queue === 'person' || v.queue === 'review' || v.queue === 'needs' || agents.some((a) => a.name === v.queue)) ? v.queue : null); setScope(v.scope as 'all' | 'needs' | 'moving' | 'closed'); setQ(v.q); if (v.scope === 'closed') setShowClosed(true) }}>{v.name}</button><button type="button" aria-label={`Delete the view ${v.name}`} onClick={() => removeView(v.name)}><X className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /></button></span>)}</div>}
-      {toast && <p className="note" role="status" style={{ margin: '10px 2px 0' }}>{toast}</p>}
+    </div>
+  )
 
-      {needs.length > 0 && <div className="group-head due"><span>Needs you</span><span className="n">{needs.length}</span></div>}
-      <div className="task-list">{needs.map((t) => row(t, idx++))}</div>
-      {moving.length > 0 && <div className="group-head"><span>In motion</span><span className="n">{moving.length}</span></div>}
-      {runnable > 0 && !state?.running && scope !== 'needs' && scope !== 'closed' && (
-        <div className="wait-hint"><img src="/art/hourglass.svg" alt="" aria-hidden="true" /><span><b>{runnable} {runnable === 1 ? 'task is' : 'tasks are'} waiting for an agent.</b> Nothing starts by itself: a run sends them and keeps what each agent prints.</span><button type="button" className="btn btn-primary btn-sm" onClick={onRun}>Run {runnable}</button></div>
-      )}
-      <div className="task-list">{moving.map((t) => row(t, idx++))}</div>
-      {closed.length > 0 && (
-        <div className="group-head"><span>Closed</span><span className="n">{closed.length}</span>
-          <button type="button" className="toggle" onClick={() => setShowClosed(!showClosed)} aria-expanded={showClosed}>{showClosed ? 'Hide' : 'Show'}<ChevronDown className="icon" style={{ width: 15, height: 15, transform: showClosed ? 'rotate(180deg)' : 'none' }} aria-hidden="true" /></button>
+  if (boardScope === 'global') {
+    const wsList = globalBoard?.workspaces ?? []
+    const totalNeeds = wsList.reduce((n, w) => n + w.counts.needs_you, 0)
+    return (
+      <div className={`board-split ${layout}`}>
+        <div className="board-left">
+          {header}
+          {!globalBoard && <p className="muted mono">Leyendo los proyectos registrados…</p>}
+          {wsList.map((w) => (
+            <section key={w.path} className="card global-ws">
+              <header className="global-ws-head">
+                <b>{w.name}</b>
+                {w.current && <span className="chip">este proyecto</span>}
+                <span className="mono muted">{w.counts.open} abiertas</span>
+                {w.counts.needs_you > 0 && <span className="chip amber-chip">{w.counts.needs_you} esperan</span>}
+                {w.error && <span className="chip dim">{w.error}</span>}
+                {!w.current && <button type="button" className="btn btn-quiet btn-xs" style={{ marginLeft: 'auto' }} onClick={() => onOpenWorkspaceTask?.(w.path, w.tasks[0]?.id ?? 0)}>Abrir proyecto</button>}
+              </header>
+              {w.tasks.map((t) => (
+                <button key={t.id} type="button" className={`board-row global-row ${t.needs_you ? 'is-needs' : ''}`} onClick={() => openGlobalTask(w.path, w.current, t.id)}>
+                  <span className="mono muted">#{pad(t.id)}</span>
+                  <span className={`pill-mini ${t.needs_you ? 'amber' : 'steel'}`}>{stateLabel({ state: t.state as Task['state'], review: null })}</span>
+                  <span className="board-row-title">{t.text}</span>
+                  <span className="mono muted">{queueName(t.queue)}</span>
+                </button>
+              ))}
+              {w.tasks.length === 0 && !w.error && <p className="muted mono global-empty">Sin tareas abiertas.</p>}
+            </section>
+          ))}
         </div>
-      )}
-      {showClosed && <div className="task-list">{closed.map((t) => row(t, idx++))}</div>}
+        <div className="board-right">
+          <section className="board-overview card" aria-label="Resumen global">
+            <div className="ov-tiles">
+              <div className={`ov-tile act ${totalNeeds ? 'has' : ''}`}><b className="mono">{totalNeeds}</b><span>Esperan en total</span></div>
+              <div className="ov-tile steel"><b className="mono">{wsList.length}</b><span>Proyectos</span></div>
+              <div className="ov-tile steel"><b className="mono">{wsList.reduce((n, w) => n + w.counts.open, 0)}</b><span>Abiertas</span></div>
+              <div className="ov-tile"><b className="mono">{wsList.filter((w) => w.error).length}</b><span>Sin tablero</span></div>
+            </div>
+            <div className="ov-block"><h3>Cómo leer esta vista</h3>
+              <p className="muted ov-empty">Es una lectura local de cada tablero, sin escribir nada. Un clic en una tarea cambia a ese proyecto y la abre con su detalle, su diff y su veredicto.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    )
+  }
 
-      {tasks.length > 0 && rows.length === 0 && (q.trim() || scope !== 'all') && (
-        <div className="empty-card" style={{ marginTop: 24 }}>
-          <img src="/art/empty.svg" alt="" aria-hidden="true" />
-          <p>No task matches this search.</p>
-          <button type="button" className="btn btn-sm" onClick={() => { setQ(''); setScope('all') }}>Clear the search</button>
+  return (
+    <div className={`board-split ${layout}`}>
+      <div className="board-left">
+        {header}
+
+        {showNew && (
+          <form className="card compact-card inline-form" onSubmit={createTask}>
+            <input className="field field-sm" autoFocus value={newText} onChange={(e) => setNewText(e.target.value)} placeholder="Describe la tarea concreta…" required />
+            <select className="select select-sm" value={newQueue} onChange={(e) => setNewQueue(e.target.value)}>
+              <option value="">Auto ({agents[0]?.name || 'person'})</option>
+              {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+              <option value="person">Persona</option>
+            </select>
+            <button type="submit" className="btn btn-primary btn-sm">Crear</button>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setShowNew(false)}>Cancelar</button>
+          </form>
+        )}
+
+        {tasks.length === 0 && (
+          <FirstSteps tasks={tasks} agents={agents} runnable={runnable} running={!!state?.running} onAdd={() => setShowNew(true)} onRun={onRun} />
+        )}
+
+        {err && <div className="banner err" role="alert"><span>{err}</span></div>}
+
+        <div className="toolbar compact-toolbar" role="search">
+          <label className="search-inline">
+            <Search className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+            <input className="field field-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar #id, texto o cola…" />
+          </label>
+          <div className="seg" role="group" aria-label="Filtro estado">
+            {(['all', 'needs', 'moving', 'closed'] as const).map((k) => (
+              <button key={k} type="button" aria-pressed={scope === k} onClick={() => setScope(k)}>
+                {k === 'all' ? 'Abiertas' : k === 'needs' ? 'Esperando' : k === 'moving' ? 'En curso' : 'Cerradas'}
+              </button>
+            ))}
+          </div>
+          {filter && (
+            <button type="button" className="btn btn-quiet btn-xs" onClick={() => onFilter(null)}>
+              <X className="icon" style={{ width: 12, height: 12 }} />Cola: {filter}
+            </button>
+          )}
         </div>
-      )}
-      {tasks.length > 0 && rows.length === 0 && !q.trim() && scope === 'all' && (
-        <div className="empty-card" style={{ marginTop: 24 }}>
-          <img src={`/art/${filter === 'person' ? 'person' : filter === 'review' || filter === 'needs' ? 'review' : 'board'}.svg`} alt="" aria-hidden="true" />
-          <p>{filter === 'needs' || filter === 'review' ? 'Nothing is waiting for a verdict.' : filter === 'person' ? 'No task is waiting for a person.' : 'Nothing in this queue.'} Pick another queue above, or add a task.</p>
+
+        <div className="acc-stack">
+          {layout === 'list' ? (
+            <div className="board-list-card card">
+              {openRows.map(renderCompactRow)}
+              {openRows.length === 0 && tasks.length > 0 && (
+                <div className="muted mono" style={{ padding: '14px 12px' }}>Sin tareas abiertas en este filtro. Pulsa `j/k` o abre Cerradas abajo.</div>
+              )}
+            </div>
+          ) : (
+            <div className="kanban-4col">
+              {[
+                { key: 'pending', title: 'Pendiente', accent: '#BBB3A8', items: kanbanCols.pending, dropQueue: agents[0]?.name || 'person' },
+                { key: 'moving', title: 'En curso', accent: '#7FA6D6', items: kanbanCols.moving, dropQueue: null },
+                { key: 'review', title: 'A revisar', accent: '#EB9D44', items: kanbanCols.review, dropQueue: null },
+                { key: 'person', title: 'Persona', accent: 'rgba(235,211,187,.55)', items: kanbanCols.person, dropQueue: 'person' },
+              ].map((col) => (
+                <section
+                  key={col.key}
+                  className="kanban-col card"
+                  style={{ borderTop: `4px solid ${col.accent}` }}
+                  onDragOver={(e) => { if (col.dropQueue && dragId != null) e.preventDefault() }}
+                  onDrop={() => { if (col.dropQueue && dragId != null) void moveToQueue(dragId, col.dropQueue) }}
+                >
+                  <div className="kanban-head">
+                    <b>{col.title}</b>
+                    <span className="mono muted">{col.items.length}</span>
+                  </div>
+                  <div className="kanban-cards">
+                    {col.items.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        draggable={t.state === 'pending' || t.state === 'person'}
+                        onDragStart={() => setDragId(t.id)}
+                        className={`kanban-card ${t.id === selectedId ? 'selected' : ''}`}
+                        onClick={() => onSelect(t.id === selectedId ? null : t.id)}
+                      >
+                        <div className="kanban-card-top">
+                          <span className="mono muted">#{pad(t.id)}</span>
+                          <span className="mono muted">{queueName(t.queue)}</span>
+                        </div>
+                        <p>{t.text}</p>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+
+          <Accordion id="board-queues" title="Colas y agentes del proyecto" count={agents.length + 1} defaultOpen={false}>
+            <div className="tiers-compact">
+              {agents.map((a) => (
+                <button key={a.name} type="button" className="tier-mini" onClick={() => onFilter(filter === a.name ? null : a.name)}>
+                  <b>{a.name}</b>
+                  <span className="mono steel">{a.system || a.model || 'CLI'}</span>
+                  <span className="mono muted">{a.pending} pend</span>
+                </button>
+              ))}
+              <button type="button" className="tier-mini" onClick={() => onFilter(filter === 'person' ? null : 'person')}>
+                <b>Persona</b>
+                <span className="mono amber">humano</span>
+                <span className="mono muted">{tasks.filter((t) => t.state === 'person').length} espera</span>
+              </button>
+            </div>
+          </Accordion>
+
+          {closedRows.length > 0 && (
+            <Accordion id="board-closed" title="Cerradas" count={closedRows.length} defaultOpen={scope === 'closed'}>
+              <div className="board-list-card">{closedRows.slice(0, 40).map(renderCompactRow)}</div>
+            </Accordion>
+          )}
         </div>
-      )}
-      {tasks.length > 0 && !filter && needs.length === 0 && (
-        <div className="empty-card" style={{ marginTop: 24 }}>
-          <img src="/art/review.svg" alt="" aria-hidden="true" />
-          <p>Nothing is waiting for you. What is in motion will land here when it is delivered.</p>
-        </div>
-      )}
-    </div></div>
+      </div>
+
+      <div className="board-right">
+        {sel ? renderDetailPane(sel) : <BoardOverview tasks={tasks} root={state?.root ?? ''} onSelect={(id) => onSelect(id)} />}
+      </div>
+    </div>
   )
 }

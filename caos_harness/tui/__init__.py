@@ -1,0 +1,63 @@
+"""Unified CAOS terminal interface package (`ChatUI`, `board_view`, 5-tab workspace)."""
+from __future__ import annotations
+
+from .board_view import CLOSED, HELP, LABEL, NEEDS, ORDER, State, compose, open_session, run
+from .chat_view import CHAT_HELP, ChatUI, ollama_models, run_chat
+from .common import (
+    FRAMES,
+    SPIN,
+    Item,
+    Row,
+    TerminalWatch,
+    _agent_desc,
+    _popup_window,
+    box_rows,
+    clip,
+    git_branch,
+    git_touched,
+    load_settings,
+    new_id,
+    pad,
+    save_settings,
+    sessions_dir,
+    settings_path,
+    skill_rows,
+    wrap,
+)
+from .theme import SKINS
+
+__all__ = [
+    "CHAT_HELP",
+    "CLOSED",
+    "FRAMES",
+    "HELP",
+    "Item",
+    "LABEL",
+    "NEEDS",
+    "ORDER",
+    "Row",
+    "SKINS",
+    "SPIN",
+    "State",
+    "TerminalWatch",
+    "ChatUI",
+    "_agent_desc",
+    "_popup_window",
+    "box_rows",
+    "clip",
+    "compose",
+    "git_branch",
+    "git_touched",
+    "load_settings",
+    "new_id",
+    "ollama_models",
+    "open_session",
+    "pad",
+    "run",
+    "run_chat",
+    "save_settings",
+    "sessions_dir",
+    "settings_path",
+    "skill_rows",
+    "wrap",
+]

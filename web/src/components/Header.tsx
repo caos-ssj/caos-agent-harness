@@ -1,13 +1,11 @@
-import React from 'react'
-import { BarChart3, BookOpen, Command, LayoutGrid, Play, Server, SlidersHorizontal, Terminal } from 'lucide-react'
-import { View } from '../lib'
-import { WorkspaceMenu } from './WorkspaceMenu'
+import React, { useEffect, useRef } from 'react'
+import { Activity, Cpu, FolderGit2, Globe, LayoutGrid, PanelLeft, Play, Search, Share2, SlidersHorizontal, Terminal, Wrench } from 'lucide-react'
+import { CaosMark } from './CaosArt'
+import { View, onTabKeys } from '../lib'
 
 interface HeaderProps {
   project: string
-  root?: string
-  onSwitched: () => void
-  sample: boolean
+  sample?: boolean
   view: View
   onView: (v: View) => void
   needsYou: number
@@ -17,47 +15,127 @@ interface HeaderProps {
   onOpenPalette: () => void
   onTogglePrefs: () => void
   prefsOpen: boolean
+  onToggleSidebar: () => void
+  sidebarCollapsed: boolean
+  scope: 'project' | 'global'
+  onScope: (s: 'project' | 'global') => void
 }
 
-const TABS: Array<[View, string, React.ElementType]> = [
-  ['console', 'Console', Terminal],
-  ['board', 'Board', LayoutGrid],
-  ['providers', 'Providers', Server],
-  ['measured', 'Measured', BarChart3],
-  ['skills', 'Skills', BookOpen],
+const TABS: Array<{ id: View; label: string; short: string; Icon: React.ElementType }> = [
+  { id: 'console', label: 'Console', short: 'Console', Icon: Terminal },
+  { id: 'board', label: 'Board', short: 'Board', Icon: LayoutGrid },
+  { id: 'providers', label: 'Models & Providers', short: 'Providers', Icon: Cpu },
+  { id: 'metrics', label: 'Metrics', short: 'Metrics', Icon: Activity },
+  { id: 'skills', label: 'Skills & Tools', short: 'Skills', Icon: Wrench },
+  { id: 'share', label: 'Share / Team', short: 'Share', Icon: Share2 },
 ]
 
-export const Header: React.FC<HeaderProps> = ({ project, root, onSwitched, sample, view, onView, needsYou, runnable, running, onRun, onOpenPalette, onTogglePrefs, prefsOpen }) => (
-  <header className="topbar">
-    <div className="brand">
-      <span className="brand-name">caos</span>
-      <span className="brand-sub">harness</span>
-    </div>
-    <WorkspaceMenu project={project} root={root} onSwitched={onSwitched} />
-    {sample && <span className="sample-tag" title="The tasks and answers on this board are made-up examples">Sample data</span>}
-    <nav className="tabs" aria-label="Views">
-      {TABS.map(([id, label, Icon]) => (
-        <button key={id} type="button" aria-current={view === id ? 'page' : undefined} onClick={() => onView(id)} title={label} aria-label={label}>
-          <Icon className="icon" aria-hidden="true" />
-          <span className="label">{label}</span>
-          {id === 'board' && needsYou > 0 && <span className="count" role="img" aria-label={`${needsYou} need you`}>{needsYou}</span>}
+export const Header: React.FC<HeaderProps> = ({
+  project,
+  sample,
+  view,
+  onView,
+  needsYou,
+  runnable,
+  running,
+  onRun,
+  onOpenPalette,
+  onTogglePrefs,
+  prefsOpen,
+  onToggleSidebar,
+  sidebarCollapsed,
+  scope,
+  onScope,
+}) => {
+  const barRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const setH = () => {
+      const h = barRef.current?.offsetHeight
+      if (h) document.documentElement.style.setProperty('--topbar-h', `${h}px`)
+    }
+    setH()
+    window.addEventListener('resize', setH)
+    return () => window.removeEventListener('resize', setH)
+  }, [])
+
+  return (
+    <header className="topbar" ref={barRef}>
+      <div className="top-left">
+        <button
+          type="button"
+          className="btn btn-quiet btn-icon btn-sm"
+          onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? 'Expandir barra lateral' : 'Colapsar barra lateral'}
+          title={sidebarCollapsed ? 'Expandir panel' : 'Colapsar panel'}
+        >
+          <PanelLeft className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
         </button>
-      ))}
-    </nav>
-    <div className="topbar-tools">
-      <button type="button" className="search-btn" onClick={onOpenPalette} aria-label="Open the command palette">
-        <Command className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
-        <span className="grow">Search or run…</span>
-        <span className="kbd" aria-hidden="true">⌘K</span>
-      </button>
-      <button type="button" className="btn btn-quiet btn-icon" aria-label="Preferences" aria-expanded={prefsOpen} aria-haspopup="dialog" onClick={onTogglePrefs} title="Preferences: density, text size, start view">
-        <SlidersHorizontal className="icon" aria-hidden="true" />
-      </button>
-      <button type="button" className="btn btn-primary btn-run" onClick={onRun} disabled={running || runnable === 0} aria-label={running ? 'Running' : `Run ${runnable} pending`} title={runnable === 0 ? 'Nothing is waiting for an agent' : `Send ${runnable} pending to their agents (R)`}>
-        <Play className="icon" style={{ width: 15, height: 15 }} fill="currentColor" aria-hidden="true" />
-        <span className="label">{running ? 'Running…' : `Run ${runnable}`}</span>
-        <span className="run-n" aria-hidden="true">{runnable}</span>
-      </button>
-    </div>
-  </header>
-)
+        <span className="brand-mark" aria-hidden="true"><CaosMark size={22} /></span>
+        <span className="brand-name">caos</span>
+        {project && <span className="repo-pill" title={project}>{project}</span>}
+        {sample && <span className="chip amber-chip">demo</span>}
+      </div>
+
+      <nav className="tabs" role="tablist" aria-label="Vistas principales" onKeyDown={onTabKeys}>
+        {TABS.map(({ id, label, short, Icon }) => {
+          const active = view === id
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              data-tab={id}
+              onClick={() => onView(id)}
+              title={label}
+            >
+              <Icon className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />
+              <span className="label">{label}</span>
+              <span className="short-label">{short}</span>
+              {id === 'board' && needsYou > 0 && (
+                <span className="tab-count" title={`${needsYou} esperando veredicto`}>
+                  {needsYou}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="top-actions">
+        <div className="seg scope-seg" role="group" aria-label="Alcance: este proyecto o todos">
+          <button type="button" aria-pressed={scope === 'project'} onClick={() => onScope('project')} title="Solo este proyecto"><FolderGit2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Proyecto</button>
+          <button type="button" aria-pressed={scope === 'global'} onClick={() => onScope('global')} title="Todos los proyectos registrados"><Globe className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Global</button>
+        </div>
+        {runnable > 0 && (
+          <button
+            type="button"
+            className="btn btn-amber btn-sm btn-run" data-count={runnable}
+            disabled={running}
+            onClick={onRun}
+            title="Ejecutar tareas pendientes en sus agentes (r)"
+          >
+            <Play className="icon" style={{ width: 13, height: 13 }} fill="currentColor" aria-hidden="true" />
+            <span className="label">{running ? 'Corriendo…' : `Ejecutar ${runnable}`}</span>
+          </button>
+        )}
+        <button type="button" className="search-btn" onClick={onOpenPalette} title="Paleta de comandos (Ctrl/⌘ K)">
+          <Search className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+          <span className="kbd">⌘K</span>
+        </button>
+        <button
+          type="button"
+          className="btn btn-quiet btn-icon btn-sm"
+          aria-haspopup="dialog"
+          aria-expanded={prefsOpen}
+          aria-label="Preferencias"
+          onClick={onTogglePrefs}
+          title="Preferencias"
+        >
+          <SlidersHorizontal className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />
+        </button>
+      </div>
+    </header>
+  )
+}

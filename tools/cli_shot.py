@@ -26,7 +26,7 @@ def run(cmd: str) -> str:
     """`command` runs it; `command::text` also types `text` into it (use \\n for Enter), the way a person would in a session."""
     cmd, _, typed = cmd.partition("::")
     argv = [sys.executable, "-m", "caos_harness", *cmd.split()[1:]] if cmd.startswith("caos-harness") else cmd.split()
-    env = {**os.environ, "PYTHONPATH": str(ROOT), "TERM": "xterm-256color", "COLUMNS": "100"}
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "TERM": "xterm-256color", "COLUMNS": "100", "CAOS_TUI": "0"}
     env.pop("NO_COLOR", None)
     master, slave = pty.openpty()
     proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, cwd=folder, env=env, close_fds=True)

@@ -1,35 +1,21 @@
-# Local workstation
+# Workstation console & orchestration
 
-The web console and `caos-harness chat` use the same Ollama workstation engine.
-Select an installed Ollama model. Plan mode does not expose command tools. Act is
-**off by default**: switch "shell commands" on for the session you are in (the switch
-lives in the server's memory and resets on restart; `chat --act` is the CLI equivalent
-for one invocation). In Act,
-the model may propose a command; the operator sees the exact command and decides
-whether to run it. Commands run with the server's operating-system privileges in
-the project directory. The directory is **not a sandbox**: shell commands can
-access other paths and the network. Review commands before approval.
+The web console, `caos-harness chat`, and `caos-harness orchestrate` share the same project guardrails and SQLite trace store.
 
-Example: `caos-harness chat --model qwen3.5:4b --act "Inspect the project"`.
-The terminal requests approval for each proposed command; a noninteractive
-terminal rejects proposals. The browser polls the current run and can reconnect
-while the server remains running. Restarting the server loses in-progress run
-state; do not automatically retry a command whose result is unknown.
+## Plan, Act, and Orquestar
 
-Only Ollama is wired to this console. Cloud providers, automatic failover,
-cross-repository execution, streaming tokens and autonomous routing are not
-implemented. The conversation retains a bounded recent text history; command
-results are stored in the local session file. Do not place credentials in prompts
-or tool output. The project board's router measurements are not evidence of
-command-execution accuracy.
+- **Plan** reads files and asks alignment questions without modifying the workspace or exposing shell execution tools.
+- **Act** enables edits and shell commands **only** when turned on explicitly for the current session ("shell commands" switch in the browser, `chat --act` in the CLI). Every proposed write shows a diff preview first, and every shell command runs with the operator's OS permissions in the workspace folder only after explicit confirmation. The workspace is **not a container sandbox**: commands can access paths reachable by your user account.
+- **Orquestar** lets a chosen orchestrator (`claude` by default, or any configured orchestrator-capable agent such as `agy`, `codex`, `opencode`, `llama`, or `qwen`) split a goal into subtasks with per-subtask acceptance criteria and isolation mode:
+  - `readonly` subtasks execute in parallel inside the project workspace.
+  - `isolated` subtasks execute in separate temporary `git worktree` checkouts, and the orchestrator synthesises the final answer without merging worktrees into your active branch automatically.
+
+## Live updates, models, and providers
+
+- The web dashboard subscribes to Server-Sent Events (`GET /api/events` and `GET /api/runs/<id>/events` backed by `EventBus`) with automatic polling fallback when `EventSource` is unavailable. Restarting the server still discards in-progress run state held in memory.
+- Supported targets include local Ollama models (single or multi-host LAN), cloud API/free-tier providers configured via environment variable names or the system keyring (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`), CLI agents (`claude`, `codex`, `opencode`, `agy`), and sequential/local failover policies.
+- Benchmarks for the classification router (`make benchmark`) measure classification precision on synthetic datasets; they do not score general shell or orchestration runs.
 
 ## Skills and publication
 
-The workstation injects the body of the packaged role skill for an explicitly
-selected role. This is context for the model, not an enforcement mechanism; the
-command approval gate is independent. The packaged skills are portable drafts
-adapted from CAOS practices, not an export of private vault notes. Additional
-skills are listed by `caos-harness skills` and are not automatically loaded by
-the workstation. Review their wording, ownership, license and current business
-policy before publishing; this change does not publish anything. Benchmarks for
-the existing classification router do not validate the new workstation roles.
+The workstation injects the body of the selected role skill as context for the model, not as an enforcement boundary; the policy layer and approval gates remain independent. Packaged skills under `caos_harness/skills/` are portable role instructions, and local project skills live under `.harness/skills/` or `CAOS_HARNESS_SKILLS` without entering the repository.

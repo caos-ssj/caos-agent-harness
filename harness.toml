@@ -18,3 +18,20 @@ timeout = 180
 command = ["ollama", "run", "qwen2.5:7b"]
 system = "qwen2.5:7b"
 timeout = 300
+
+[agents.claude]
+command = ["claude", "-p"]
+timeout = 600
+
+[agents.codex]
+command = ["codex", "exec", "-"]
+timeout = 600
+
+# Antigravity CLI: the prompt is the value of -p (placeholder), not stdin
+[agents.agy]
+command = ["agy", "--mode", "accept-edits", "--output-format", "text", "-p", "{prompt}"]
+timeout = 600
+
+[agents.opencode]
+command = ["opencode", "run", "-m", "opencode/glm-5.3-flash-free"]
+timeout = 600

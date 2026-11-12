@@ -46,12 +46,14 @@ def test_a_key_is_refused_and_an_old_stored_key_is_never_returned(api):
 def test_providers_claim_only_what_is_wired(api):
     info = api.providers_info()
     wired = [p["id"] for p in info["providers"] if p.get("wired")]
-    assert wired == ["ollama"]
+    assert "ollama" in wired and "anthropic" in wired and "openai" in wired and "openrouter" in wired
     for p in info["providers"]:
-        if not p.get("wired"):
-            assert p["models"] == [] and p["cost_per_m"] == "not measured"
-    assert info["active_failover"]["enabled"] is False and info["active_failover"]["strategy"] == "not_implemented"
-    assert api.save_failover({"enabled": True, "fallback_model": "m", "strategy": "magic"}) == {"fallback_model": "m", "enabled": False, "strategy": "not_implemented"}
+        if p["id"] != "ollama":
+            assert p["cost_per_m"] == "not measured"   # never claim an external price table
+            assert "api_key" not in p
+    assert info["active_failover"]["enabled"] is False and info["active_failover"]["strategy"] == "sequential"
+    saved_fo = api.save_failover({"enabled": True, "fallback_target": "ollama", "fallback_model": "m", "strategy": "local_fallback"})
+    assert saved_fo["enabled"] is True and saved_fo["fallback_model"] == "m" and saved_fo["strategy"] == "local_fallback"
 
 
 def test_console_only_offers_the_project_it_was_started_in(api):

@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from caos_harness import app, repl
+from caos_harness import app, repl, style
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -47,7 +47,8 @@ def test_the_emblem_is_drawn_only_on_a_terminal_and_stacks_on_a_narrow_one(proje
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
     wide = repl.banner(project, cols=100, emblem=True)
-    assert "╭───────╮" in wide and "\x1b[38;2;201;151;92m" in wide        # the amber tick
+    r, g, b = style.AMBAR
+    assert "╭───────╮" in wide and f"\x1b[38;2;{r};{g};{b}m" in wide        # the amber tick
     narrow = repl.banner(project, cols=50, emblem=True)
     assert "╭" not in narrow                                             # no room: facts only
     monkeypatch.setenv("NO_COLOR", "1")
@@ -101,7 +102,7 @@ def test_a_real_terminal_opens_the_session_and_respects_no_color(tmp_path, no_co
     import pty
     import select
     app.init(tmp_path)
-    env = {**os.environ, "PYTHONPATH": str(ROOT), "TERM": "xterm-256color", "COLUMNS": "100"}
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "TERM": "xterm-256color", "COLUMNS": "100", "CAOS_TUI": "0"}   # CAOS_TUI=0: the line-mode session
     env.pop("NO_COLOR", None)
     if no_color:
         env["NO_COLOR"] = "1"
@@ -127,3 +128,20 @@ def test_a_real_terminal_opens_the_session_and_respects_no_color(tmp_path, no_co
 def test_repl_command_reads_piped_commands_for_scripts(project):
     r = subprocess.run([sys.executable, "-m", "caos_harness", "repl"], input="/task list\n/quit\n", capture_output=True, text=True, cwd=project.root, env={**os.environ, "PYTHONPATH": str(ROOT)})
     assert r.returncode == 0 and "nothing open" in r.stdout and "\x1b" not in r.stdout
+
+
+def test_repl_compact_two_line_banner_default_and_new_slash_commands(project, capsys, monkeypatch):
+    monkeypatch.setenv("CAOS_HARNESS_HOME", str(project.root.parent / "replhome"))
+    compact = repl.banner(project, cols=100, emblem=False)
+    assert "╭───────╮" not in compact and "◈ caos · harness" in compact and len(compact.splitlines()) <= 5
+    sess = repl.Session(project)
+    assert sess.handle("/metrics")
+    assert "Metrics (" in capsys.readouterr().out
+    assert sess.handle("/doctor --dry-run")
+    out = capsys.readouterr().out
+    assert "Doctor: " in out and "dry run" in out and "0 tokens" in out and "Leak scan" in out
+    assert sess.handle("/share doctor")
+    assert "Doctor: clean" in capsys.readouterr().out
+    assert sess.handle("/pack zip")
+    assert "Share Pack created" in capsys.readouterr().out
+

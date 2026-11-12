@@ -24,7 +24,7 @@ export const FirstSteps: React.FC<FirstStepsProps> = ({ tasks, agents, runnable,
       {!hasTask && <img className="steps-cover" src="/art/cover.svg" alt="" aria-hidden="true" />}
       <div className="steps-head">
         <div>
-          <h2 id="steps-title">{hasTask ? 'Where you are' : 'Start here'}</h2>
+          <h2 id="steps-title">{hasTask ? 'Dónde estás' : 'Primeros pasos'}</h2>
           <p>{hasTask ? 'The board is working; the steps left before your first task closes.' : 'The board is empty. A task goes in, an agent runs it, and nothing closes until you give a verdict.'}</p>
         </div>
         {onDismiss && <button type="button" className="hide-link" onClick={onDismiss}>Hide</button>}

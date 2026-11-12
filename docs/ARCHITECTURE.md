@@ -35,7 +35,9 @@ sequenceDiagram
 | Module | Contract | Failure it exists for |
 |---|---|---|
 | `router` | `choose(profiles, min_precision_lo) -> Decision`. Profiles come from benchmark reports; tiers from `router.json` | Picking a model by name or habit; using a model for a task it is not good enough for |
-| `board` | `add`, `assign(task, agent, dispatcher)`, `deliver`, `review`. `Dispatcher` is a two-method protocol (`is_idle`, `send`) | Double sends, tasks sent to a busy agent, tasks lost on a failed send, work closed by whoever did it |
+| `board` | `add`, `assign(task, agent, dispatcher)`, `deliver`, `review` + `parent_id` hierarchy. `CommandDispatcher` runs idle agents in parallel (`run_pending`, `{prompt}` argv placeholder, optional `cwd`) | Double sends, busy-agent collisions, lost sends, shell injection, work closed by whoever did it |
+| `orchestrator` | `plan_orchestration`, `OrchestrationRun` (parallel worker threads, `readonly` workspace vs isolated `git worktree`, orchestrator final synthesis) | Manual copy-pasting across CLIs, conflicting edits on the same branch, lack of acceptance criteria per subtask |
+| `web` | Stdlib HTTP server + `EventBus` SSE streams (`/api/events`, `/api/runs/<id>/events`) + React/TypeScript 6-view SPA | Polling overhead, split desktop state vs terminal queues, unverified provider keys leaking into config |
 | `skills` | `caos_harness/skills/<name>/SKILL.md` with `name` and `description`; the board sends the pointer before the task | Each agent starting from different rules |
 | `engines` | `run_agent(question, session, llm, tools, policy) -> Result`, implemented twice: plain loop and LangGraph | Lock-in to one orchestrator; logic hidden inside a framework |
 | `policy` | `Policy.check(tool, args)` raises `Blocked`; budgets for steps, tool calls and wall time | Tool misuse, path traversal, runaway loops |

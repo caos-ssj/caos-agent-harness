@@ -2,7 +2,7 @@
 
     caos-harness                      # banner, what waits for you, a prompt
     /task add "…" --queue echo        # slash commands mirror the CLI; Tab completes them, ↑ recalls history
-    /run   /review 5 ok "why"   /status   /skills   /serve   /help   /quit
+    /run   /review 5 ok "why"   /status   /skills   /doctor   /serve   /help   /quit
 
 Standard library only (`readline` where the platform has it). The scripts keep working: `status`, `task list`,
 `run` and friends are unchanged, and with no terminal nothing here draws colour or asks a question.
@@ -21,7 +21,7 @@ from contextlib import redirect_stdout
 from importlib import metadata
 from pathlib import Path
 
-from . import app, style
+from . import app, share, style, term
 
 # The mark, drawn in text: a ring inside a ring, rays between, and the single amber tick at twelve o'clock.
 EMBLEM = [
@@ -46,6 +46,12 @@ COMMANDS = {
     "/discard": "<id>: drop a task that is still pending",
     "/status": "what waits for you, and the queues",
     "/skills": "the skills an agent can be told to read first",
+    "/providers": "list providers, test auth, or run a live smoke check",
+    "/metrics": "[project|global] [--md]: operational KPIs and per-model summary",
+    "/probe": "<provider> [model]: connectivity check, or a live smoke check when a model is given",
+    "/doctor": "[--dry-run] [--strict]: preflight, ready | warning | blocked and what to do next; spends no tokens",
+    "/pack": "[zip|dir|tar.gz] [--dry-run]: build a clean Share Pack for teammates, or preview it",
+    "/share": "doctor · preview · pack · upload: the leak scan and the Share Pack",
     "/serve": "start the dashboard here [port], then keep working",
     "/clear": "clear the screen",
     "/help": "this list",
@@ -68,13 +74,13 @@ def _short(text: str, n: int) -> str:
 
 def _rows(p: app.Project) -> list:
     order = ["to_review", "verify", "person", "sending", "pending", "returned", "sent", "ok", "superseded", "discarded"]
-    rows = p.board.conn.execute("SELECT * FROM tasks ORDER BY id DESC").fetchall()
+    rows = p.board.rows(descending=True)
     return sorted(rows, key=lambda r: order.index(app.task_state(r)))
 
 
 def queues(p: app.Project) -> list[tuple[str, int]]:
     """Open tasks held by each agent, then the person's queue: the same counts the dashboard's queue column shows."""
-    open_ = [(r, app.task_state(r)) for r in p.board.conn.execute("SELECT * FROM tasks").fetchall()]
+    open_ = [(r, app.task_state(r)) for r in p.board.rows()]
     open_ = [(r, s) for r, s in open_ if s not in ("ok", "superseded", "discarded")]
     out = [(a, sum(1 for r, _ in open_ if r["queue"] == a)) for a in p.agents]
     return out + [("a person", sum(1 for _, s in open_ if s == "person"))]
@@ -102,13 +108,31 @@ def waiting(p: app.Project, limit: int = 5, width: int = 100) -> list[str]:
     return lines
 
 
-def banner(p: app.Project, cols: int = 100, emblem: bool = True) -> str:
-    """The opening screen: emblem and facts side by side on a wide terminal, stacked on a narrow one, then what waits."""
+def banner(p: app.Project, cols: int = 100, emblem: bool = False) -> str:
+    """Opening screen: compact 2-line banner by default (`emblem=False`), full emblem only when requested."""
     from .skills import load_all
     s, st = app.summary(p), p.board.stats()
-    skills = list(load_all())
+    skills = list(load_all(project_root=p.root))
     q = [f"{name} {n}" for name, n in queues(p)]
     wide = emblem and cols >= EMBLEM_WIDTH + 44
+    if not emblem:
+        wait_txt = style.paint(f"{s['needs_you']} for you", style.AMBAR) if s["needs_you"] else "nothing"
+        run_txt = f" · {s['runnable']} ready to run" if s["runnable"] else ""
+        line1 = (
+            f"{style.paint('◈ caos · harness', style.CHAMPAN, True)} {style.dim(version())}"
+            f" · {style.paint(p.root.name, style.HUESO)} · {wait_txt}{run_txt}"
+        )
+        q_str = " · ".join(q)
+        sk_str = " · ".join(skills[:4]) + (f" · +{len(skills) - 4}" if len(skills) > 4 else "")
+        line2 = (
+            f"{style.dim('queues ' + _short(q_str, max(24, cols // 2)))}"
+            f" · {style.dim(str(st['tasks']) + ' tasks')}"
+            f" · {style.dim('skills ' + _short(sk_str, max(18, cols // 3)))}"
+        )
+        w_lines = waiting(p, width=cols)
+        lines = [line1, line2] + ([""] + w_lines if w_lines else [])
+        lines += ["", style.dim("/ for commands · Tab completes · ↑ history · Ctrl-D leaves")]
+        return "\n".join(lines)
     room = max(24, cols - (EMBLEM_WIDTH + 4 if wide else 12))
     label = lambda k: style.dim(format(k, "<9"))
     facts = [
@@ -185,10 +209,7 @@ class Session:
         self._work("run", rest)
 
     def do_review(self, rest):
-        if len(rest) == 2 and rest[1] == "redo":   # the dashboard asks for the same: a returned task says what to fix
-            print("A redo needs a note: /review <id> redo \"what to fix\"")
-            return
-        self._work("review", rest)
+        self._work("review", rest)   # a redo without a note is refused there, as it is by the dashboard
 
     def do_discard(self, rest):
         self._work("discard", rest)
@@ -196,15 +217,50 @@ class Session:
     def do_status(self, rest):
         print("\n".join(waiting(self.p, width=shutil.get_terminal_size((100, 24)).columns) or [style.dim("Nothing is waiting for you.")]))
         print()
+        s = app.summary(self.p)
+        if style.fancy():
+            rows = [[name, str(n)] for name, n in queues(self.p)]
+            print("\n".join(term.table(["queue", "open"], rows, "<>", title=f"{s['tasks']} tasks · {s['runnable']} ready to run")))
+            return
         for name, n in queues(self.p):
             print(f"  {style.paint(format(name, '<16'), style.HUESO)} {n:>3} open")
-        s = app.summary(self.p)
         print(style.dim(f"\n  {s['tasks']} tasks · {s['runnable']} ready to run"))
 
     def do_skills(self, rest):
         from .skills import load_all
-        for sk in load_all().values():
-            print(f"  {style.paint(format(sk.name, '<18'), style.HUESO)} {_short(sk.description, 70)}")
+        skills = list(load_all(project_root=self.p.root).values())
+        if style.fancy():
+            rows = [[sk.name, style.dim(sk.category), _short(sk.description, 70)] for sk in skills]
+            print("\n".join(term.table(["skill", "category", "description"], rows, title=f"{len(rows)} skills")))
+            return
+        for sk in skills:
+            print(f"  {style.paint(format(sk.name, '<18'), style.HUESO)} [{sk.category}] {_short(sk.description, 60)}")
+
+    def do_providers(self, rest):
+        self._work("providers", rest or ["list"])
+
+    def do_metrics(self, rest):
+        self._work("metrics", rest)
+
+    def do_probe(self, rest):
+        if len(rest) >= 2:
+            self._work("providers", ["smoke", rest[0], rest[1]])
+        elif len(rest) == 1:
+            self._work("providers", ["test", rest[0]])
+        else:
+            self._work("providers", ["ollama-hosts"])
+
+    def do_doctor(self, rest):
+        self._work("doctor", rest)
+
+    def do_pack(self, rest):
+        if rest and not rest[0].startswith("--"):   # `/pack tar.gz`: the format is a word, not a flag; a bad one is refused by the CLI
+            self._work("share", ["pack", "--format", rest[0], *rest[1:]])
+        else:
+            self._work("share", ["pack", *rest])
+
+    def do_share(self, rest):
+        self._work("share", rest or ["doctor"])
 
     def do_serve(self, rest):
         from .web.server import make_server
@@ -270,10 +326,18 @@ def _setup_readline(p: app.Project):
             opts = [v for v in VERDICTS if v.startswith(text)]
         elif head == "/task" and len(before) == 1:
             opts = [c for c in ("add", "list", "show") if c.startswith(text)]
+        elif head == "/providers" and len(before) == 1:
+            opts = [c for c in ("list", "add", "test", "smoke", "failover", "ollama-hosts") if c.startswith(text)]
+        elif head == "/share" and len(before) == 1:
+            opts = [c for c in ("doctor", "preview", "pack", "upload") if c.startswith(text)]
+        elif head == "/pack" and len(before) == 1:
+            opts = [c for c in share.FORMATS if c.startswith(text)]
+        elif before[-1] == "--profile":
+            opts = [c for c in ("local-first", "hybrid", "cloud-max") if c.startswith(text)]
         elif before[-1] in ("--queue", "--agent"):
             opts = [a for a in agents if a.startswith(text)]
         elif text.startswith("--"):
-            opts = [f for f in ("--queue", "--tier", "--skill", "--all", "--agent") if f.startswith(text)]
+            opts = [f for f in ("--queue", "--tier", "--skill", "--all", "--agent", "--dry-run", "--json", "--profile") if f.startswith(text)]
         else:
             opts = []
         return (opts + [None])[state]
@@ -284,15 +348,26 @@ def _setup_readline(p: app.Project):
     return lambda: (hist.parent.mkdir(parents=True, exist_ok=True), readline.write_history_file(hist))
 
 
-def run(p: app.Project | None = None, stdin=None, interactive: bool | None = None) -> int:
-    """Opens the session. On a terminal it draws the banner and prompts; with piped input it reads one command per line, plain."""
+def _discard_output() -> None:
+    """Points stdout at the null device once its terminal has left, so the session ends without an error about a line it could not print."""
+    import os
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, sys.stdout.fileno())
+        os.close(null)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def run(p: app.Project | None = None, stdin=None, interactive: bool | None = None, emblem: bool = False) -> int:
+    """Opens the session. Defaults to the compact 2-line banner unless `emblem=True`."""
     p = p or app.load()
     stdin = stdin or sys.stdin
     tty = (stdin.isatty() and sys.stdout.isatty()) if interactive is None else interactive
     cols = shutil.get_terminal_size((100, 24)).columns
     sess = Session(p, tty=tty, ask=input if tty else (lambda prompt: ""))   # piped input never gets a question
     save = _setup_readline(p) if tty else None
-    print(banner(p, cols, emblem=tty))
+    print(banner(p, cols, emblem=bool(tty and emblem)))
     print()
     try:
         while True:
@@ -305,7 +380,11 @@ def run(p: app.Project | None = None, stdin=None, interactive: bool | None = Non
                     if line == "":
                         break
             except EOFError:
-                print()
+                try:
+                    print()
+                    sys.stdout.flush()
+                except OSError:           # not Ctrl-D: the terminal itself is gone, so nothing more can be written to it
+                    _discard_output()
                 break
             except KeyboardInterrupt:
                 now = time.monotonic()

@@ -1,7 +1,7 @@
 """Builds a sample project for screenshots and for trying the dashboard: `python3 tools/seed_demo.py <folder> [--force]`.
 
 Everything it writes is sample data and the dashboard says so: the folder gets a `.harness/sample` marker, which
-makes `/api/state` report `"sample": true` and the page show a "Sample data" label. The agents are two tiny
+makes `/api/state` report `"sample": true` and the header show a `demo` chip. The agents are two tiny
 commands that print canned deliveries, so no model is needed. The counts the dashboard shows still come from the
 board it creates (`Board.stats()`); only the tasks and the answers are made up.
 """

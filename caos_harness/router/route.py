@@ -34,6 +34,7 @@ class Profile:
     p95_s: float
     seconds_per_1000: float | None = None
     tokens_per_1000: int | None = None
+    precision_hi: float | None = None   # upper end of the same 95 % interval (the report stores both ends)
 
     @property
     def cost(self) -> float:
@@ -62,7 +63,7 @@ def load_profiles(reports: Path | None = None, split: str = "all") -> list[Profi
                 continue
             tin, tout = v.get("tokens_in_per_1000"), v.get("tokens_out_per_1000")
             p = Profile(system, m.group(1), v["answered"], v["precision"], v["precision_ci95"][0], v["coverage"], v["latency_p50_s"], v["latency_p95_s"],
-                        v.get("seconds_per_1000"), (tin + tout) if tin is not None and tout is not None else None)
+                        v.get("seconds_per_1000"), (tin + tout) if tin is not None and tout is not None else None, v["precision_ci95"][1])
             if system not in latest or p.measured >= latest[system].measured:
                 latest[system] = p
     return sorted(latest.values(), key=lambda p: p.system)

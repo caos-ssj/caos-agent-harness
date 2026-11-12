@@ -80,7 +80,7 @@ def test_api_state_review_rules_and_router_table(project):
     api.run(wait=True)
     s = api.state()
     by_id = {x["id"]: x for x in s["tasks"]}
-    assert by_id[t]["state"] == "to_review" and by_id[t]["router"] == {"tier": "medium", "system": "llama3.2:3b+rules", "action": "route"}
+    assert by_id[t]["state"] == "to_review" and {k: by_id[t]["router"][k] for k in ("tier", "system", "action")} == {"tier": "medium", "system": "llama3.2:3b+rules", "action": "route"} and "lower bound" in by_id[t]["router"]["reason"]
     assert by_id[p]["state"] == "person" and by_id[p]["router"]["action"] == "human_review"
     assert not s["running"] and {a["name"] for a in s["agents"]} == {"echo", "upper", "broken", "slow"}
     with pytest.raises(app.ConfigError, match="needs a note"):
@@ -282,3 +282,13 @@ def test_a_moved_task_no_longer_claims_the_router_chose_its_queue(project):
     for bad in (["upper"], {"a": 1}, None, 5):
         with pytest.raises(app.ConfigError, match="unknown queue"):
             api.move(tid, {"queue": bad})
+
+
+def test_workspace_status_marks_non_git_folder_explicitly(project, monkeypatch):
+    import types
+    from caos_harness.web import server as srv
+
+    monkeypatch.setattr(srv.subprocess, "run", lambda *a, **kw: types.SimpleNamespace(returncode=128, stdout="", stderr="not a git repo"))
+    st = Api(project).workspace_status()
+    assert st["git_repo"] is False and st["branch"] is None and st["dirty_files"] == []
+    assert all("provider" in a and "model" in a for a in Api(project).state()["agents"])

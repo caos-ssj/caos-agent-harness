@@ -25,8 +25,8 @@ A project folder with `harness.toml`; agents are commands. The operator adds tas
 - Task lifecycle: pending, sending, sent (delivered or not), discarded; review verdicts ok, redo, verify, superseded. The queue named `person` is the human reviewer's.
 - Router tiers (low, medium, high, critical) decide the agent or a person from measured profiles.
 - The trace holds identifiers, statuses and reasons, never task text.
-- Interface language: English (user, 2026-11-10). No authentication: the server listens on 127.0.0.1 only.
-- Undecided: multi-user review with reviewer names; remote access.
+- Interface language: Spanish UI copy with English section headings; local loopback server (`127.0.0.1` only) with origin header guard and SSE (`EventBus`).
+- Multi-agent orchestration (`Orquestar` mode and `caos-harness orchestrate`): selectable orchestrator (`claude`, `agy`, `codex`, `opencode`, Ollama), editable Critical Delegation Desk, hybrid `readonly` and isolated `git worktree` workers, and final synthesis.
 
 ## Brand Commitments
 CAOS identity as recorded in the brand note of 2026-09-28: "nocturnal, sober". Palette: negro #060607, tinta #101013, borde #26262A, tenue #5C5C5A, gris #93938F, hueso #EDEAE5, champán #EBD3BB, ámbar #C9975C. Three voices: UnifrakturMaguntia for the name only; EB Garamond for the human voice; JetBrains Mono for evidence (figures, commands, paths). One warm element per piece. The CLI carries the same identity (user, 2026-11-10).

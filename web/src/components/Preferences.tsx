@@ -1,55 +1,112 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect } from 'react'
 import { Prefs } from '../prefs'
 import { View } from '../lib'
+import { useDialog, usePresence } from '../hooks'
 
-interface PreferencesProps { prefs: Prefs; onChange: (p: Partial<Prefs>) => void; onReset: () => void; onClose: () => void }
-const STARTS: Array<[View, string]> = [['board', 'Board'], ['console', 'Console'], ['measured', 'Measured']]
+interface PreferencesProps {
+  open: boolean
+  prefs: Prefs
+  onChange: (p: Partial<Prefs>) => void
+  onReset: () => void
+  onClose: () => void
+}
 
-/* Three choices that change how the work feels, nothing else: how many tasks fit, how large the text is, and where
-   the page opens. Stored in this browser only. */
-export const Preferences: React.FC<PreferencesProps> = ({ prefs, onChange, onReset, onClose }) => {
-  const ref = useRef<HTMLDivElement>(null)
+const STARTS: Array<[View, string]> = [
+  ['console', 'Console'],
+  ['board', 'Board'],
+  ['providers', 'Providers'],
+  ['metrics', 'Metrics'],
+]
+
+export const Preferences: React.FC<PreferencesProps> = ({ open, prefs, onChange, onReset, onClose }) => {
+  const pres = usePresence(open, 150)
+  const ref = useDialog<HTMLDivElement>(open, onClose, { initial: 'button[aria-pressed="true"]' })
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>('button[aria-pressed="true"]')?.focus()
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    const click = (e: MouseEvent) => { const t = e.target as HTMLElement; if (ref.current && !ref.current.contains(t) && !t.closest('[aria-haspopup="dialog"]')) onClose() }
-    window.addEventListener('keydown', key); window.addEventListener('mousedown', click)
-    return () => { window.removeEventListener('keydown', key); window.removeEventListener('mousedown', click) }
-  }, [onClose])
+    if (!open) return
+    const click = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (ref.current && !ref.current.contains(t) && !t.closest('[aria-haspopup="dialog"]')) onClose()
+    }
+    window.addEventListener('mousedown', click)
+    return () => window.removeEventListener('mousedown', click)
+  }, [open, onClose, ref])
+
+  if (!pres.mounted) return null
   return (
-    <div className="pop" role="dialog" aria-label="Preferences" ref={ref}>
-      <h2>Preferences</h2>
+    <div className="pop" role="dialog" aria-label="Preferences" ref={ref} data-leaving={pres.leaving ? '' : undefined}>
+      <h2>Preferencias</h2>
       <fieldset>
-        <legend>Density</legend>
+        <legend>Densidad</legend>
         <div className="seg">
-          <button type="button" aria-pressed={prefs.density === 'comfortable'} onClick={() => onChange({ density: 'comfortable' })}>Comfortable</button>
-          <button type="button" aria-pressed={prefs.density === 'compact'} onClick={() => onChange({ density: 'compact' })}>Compact</button>
-        </div>
-        <p className="hint">Compact fits about a third more tasks on a laptop screen.</p>
-      </fieldset>
-      <fieldset>
-        <legend>Text size</legend>
-        <div className="seg">
-          <button type="button" aria-pressed={prefs.text === 'standard'} onClick={() => onChange({ text: 'standard' })}>Standard</button>
-          <button type="button" aria-pressed={prefs.text === 'large'} onClick={() => onChange({ text: 'large' })}>Large</button>
+          <button type="button" aria-pressed={prefs.density === 'compact'} onClick={() => onChange({ density: 'compact' })}>Compacta</button>
+          <button type="button" aria-pressed={prefs.density === 'comfortable'} onClick={() => onChange({ density: 'comfortable' })}>Cómoda</button>
         </div>
       </fieldset>
       <fieldset>
-        <legend>Open on</legend>
+        <legend>Texto</legend>
         <div className="seg">
-          {STARTS.map(([v, label]) => <button key={v} type="button" aria-pressed={prefs.start === v} onClick={() => onChange({ start: v })}>{label}</button>)}
+          <button type="button" aria-pressed={prefs.text === 'standard'} onClick={() => onChange({ text: 'standard' })}>Estándar</button>
+          <button type="button" aria-pressed={prefs.text === 'large'} onClick={() => onChange({ text: 'large' })}>Grande</button>
         </div>
       </fieldset>
       <fieldset>
-        <legend>Notifications</legend>
-        <label className="ws-check"><input type="checkbox" checked={prefs.notify} onChange={async (e) => {
-          const on = e.target.checked
-          if (on && 'Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission() } catch { /* ignore */ } }
-          onChange({ notify: on && 'Notification' in window && Notification.permission === 'granted' })
-        }} />Tell me when a task is waiting for review</label>
-        <p className="hint">{!('Notification' in window) ? 'This browser has no notifications.' : Notification.permission === 'denied' ? 'The browser has blocked notifications for this page.' : 'Only while this page is open. The tab title always shows how many need you.'}</p>
+        <legend>Abrir en</legend>
+        <div className="seg">
+          {STARTS.map(([v, label]) => (
+            <button key={v} type="button" aria-pressed={prefs.start === v} onClick={() => onChange({ start: v })}>
+              {label}
+            </button>
+          ))}
+        </div>
       </fieldset>
-      <div className="pop-foot"><span>kept in this browser</span><button type="button" className="btn btn-quiet btn-sm" onClick={onReset}>Reset</button></div>
+      <fieldset>
+        <legend>Perfil de enrutamiento</legend>
+        <div className="seg" role="group" aria-label="Perfil de enrutamiento">
+          <button type="button" aria-pressed={prefs.profile === 'local-first'} onClick={() => onChange({ profile: 'local-first' })} title="Privacidad y sin conexión: usa modelos locales mientras alguno responda">Local primero</button>
+          <button type="button" aria-pressed={prefs.profile === 'hybrid'} onClick={() => onChange({ profile: 'hybrid' })} title="Cada intención va donde rinde mejor">Híbrido</button>
+          <button type="button" aria-pressed={prefs.profile === 'cloud-max'} onClick={() => onChange({ profile: 'cloud-max' })} title="El mejor proveedor de nube conectado">Máx. nube</button>
+        </div>
+        <p className="pref-note">Decide qué modelo elige «Auto Intent» en Console.</p>
+      </fieldset>
+      <fieldset>
+        <legend>Animaciones</legend>
+        <div className="seg" role="group" aria-label="Animaciones">
+          <button type="button" aria-pressed={prefs.motion === 'fluid'} onClick={() => onChange({ motion: 'fluid' })}>Fluido</button>
+          <button type="button" aria-pressed={prefs.motion === 'focus'} onClick={() => onChange({ motion: 'focus' })} title="Sin movimiento decorativo">Enfoque</button>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Inspector de Console</legend>
+        <label className="ws-check">
+          <input type="checkbox" checked={prefs.inspector} onChange={(e) => onChange({ inspector: e.target.checked })} />
+          Abierto por defecto (en pantallas anchas)
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Notificaciones</legend>
+        <label className="ws-check">
+          <input
+            type="checkbox"
+            checked={prefs.notify}
+            onChange={async (e) => {
+              const on = e.target.checked
+              if (on && 'Notification' in window && Notification.permission === 'default') {
+                try {
+                  await Notification.requestPermission()
+                } catch {
+                  /* ignore */
+                }
+              }
+              onChange({ notify: on && 'Notification' in window && Notification.permission === 'granted' })
+            }}
+          />
+          Avisar cuando llegue una entrega a revisar
+        </label>
+      </fieldset>
+      <div className="pop-foot">
+        <span>guardado en este navegador</span>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onReset}>Restablecer</button>
+      </div>
     </div>
   )
 }

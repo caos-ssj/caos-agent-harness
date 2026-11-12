@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Cpu } from 'lucide-react'
 import { Agent, ModelProfile, ProviderItem, RouterTier } from '../api'
 import { baseName, clears, gb, isEmbedding, variantsOf } from '../models'
+import { useDialog, usePresence } from '../hooks'
 
 interface ModelPickerProps { provider?: ProviderItem; profiles: ModelProfile[]; tiers: RouterTier[]; agents: Agent[]; value: string; onChange: (m: string) => void }
 
@@ -11,12 +12,13 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, profiles, ti
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const box = useRef<HTMLDivElement>(null)
+  const pres = usePresence(open, 150)
+  const popRef = useDialog<HTMLDivElement>(open, () => setOpen(false), { initial: 'input' })
   useEffect(() => {
     if (!open) return
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     const click = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false) }
-    window.addEventListener('keydown', key); window.addEventListener('mousedown', click)
-    return () => { window.removeEventListener('keydown', key); window.removeEventListener('mousedown', click) }
+    window.addEventListener('mousedown', click)
+    return () => window.removeEventListener('mousedown', click)
   }, [open])
 
   const rows = useMemo(() => {
@@ -39,9 +41,9 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, profiles, ti
         {current?.best ? <span className="chip">{(current.best.precision * 100).toFixed(0)}% measured</span> : current ? <span className="chip dim">not measured</span> : <span className="chip dim">not installed</span>}
         <ChevronDown className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
       </button>
-      {open && (
-        <div className="pop mp-pop" role="dialog" aria-label="Local models">
-          <input className="field" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a model" aria-label="Find a model" />
+      {pres.mounted && (
+        <div className="pop mp-pop" ref={popRef} data-leaving={pres.leaving ? '' : undefined} role="dialog" aria-label="Local models">
+          <input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a model" aria-label="Find a model" />
           <p className="hint" style={{ margin: '8px 2px 6px' }}>{rows.length} installed in Ollama · {rows.filter((r) => r.best).length} measured. Measured models are listed first.</p>
           <ul className="mp-list" role="listbox" aria-label="Installed models">
             {shown.map((r) => (

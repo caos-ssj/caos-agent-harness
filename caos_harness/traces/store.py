@@ -20,17 +20,26 @@ SOURCES = ("board", "agent", "validation", "review", "router")
 
 class Trace:
     def __init__(self, path: str | Path = ":memory:", clock=time.time):
-        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self.db = sqlite3.connect(str(path), check_same_thread=False, timeout=30)   # another process may be writing the same file
+        self.db.execute("PRAGMA busy_timeout=30000")
         self.db.executescript(SCHEMA)
         self.lock, self.clock = threading.Lock(), clock
+
+    def close(self) -> None:
+        with self.lock:
+            self.db.close()
 
     def event(self, run_id: str, source: str, kind: str, name: str = "", status: str = "", reason: str = "", seconds: float | None = None, **data) -> None:
         if source not in SOURCES:
             raise ValueError(f"unknown source: {source}")
         with self.lock:
-            self.db.execute("INSERT INTO events(ts,run_id,source,kind,name,status,reason,seconds,data) VALUES (?,?,?,?,?,?,?,?,?)",
-                            (self.clock(), str(run_id), source, kind, name, status, reason, seconds, json.dumps(data, ensure_ascii=False) if data else None))
-            self.db.commit()
+            try:
+                self.db.execute("INSERT INTO events(ts,run_id,source,kind,name,status,reason,seconds,data) VALUES (?,?,?,?,?,?,?,?,?)",
+                                (self.clock(), str(run_id), source, kind, name, status, reason, seconds, json.dumps(data, ensure_ascii=False) if data else None))
+                self.db.commit()
+            except BaseException:
+                self.db.rollback()
+                raise
 
     def timeline(self, run_id: str) -> list[dict]:
         cols = ("seq", "ts", "run_id", "source", "kind", "name", "status", "reason", "seconds", "data")

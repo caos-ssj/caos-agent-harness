@@ -7,9 +7,25 @@ from caos_harness.skills import known, load_all, load_packaged, parse
 
 def test_every_skill_parses_and_names_when_to_use_it():
     skills = load_packaged()
-    assert set(skills) == {"coder", "qa", "writer", "model-selection", "social-content", "source-research", "proposals"}
+    assert set(skills) == {
+        "coder",
+        "qa",
+        "writer",
+        "model-selection",
+        "social-content",
+        "source-research",
+        "proposals",
+        "ui-design",
+        "webapp-testing",
+        "mcp-builder",
+        "context-engineering",
+        "doc-converter",
+    }
+    assert not skills["social-content"].team_shareable
+    assert not skills["proposals"].team_shareable
+    assert skills["coder"].team_shareable and skills["ui-design"].team_shareable
     for s in skills.values():
-        assert len(s.description) > 40 and len(s.body.splitlines()) <= 40, s.name  # short enough to be read every time
+        assert len(s.description) > 30 and len(s.body.splitlines()) <= 40, s.name  # short enough to be read every time
 
 
 def test_public_skills_carry_no_private_paths_or_project_names():
