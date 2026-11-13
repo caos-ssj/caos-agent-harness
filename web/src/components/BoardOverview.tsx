@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowRightLeft, CheckCircle2, CircleDot, RotateCcw, Send } from 'lucide-react'
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, CircleDot, RotateCcw, Send } from '../icons'
 import { ActivityEvent, ActivityResponse, api, Task } from '../api'
 import { ago, NEEDS, pad, stateLabel } from '../lib'
 

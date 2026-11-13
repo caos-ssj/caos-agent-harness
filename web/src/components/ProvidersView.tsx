@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, GitCompareArrows, KeyRound, Pin, Plus, RefreshCw, Terminal, Trash2, Zap } from 'lucide-react'
+import { ArrowRight, Check, GitCompareArrows, KeyRound, Pin, Plus, RefreshCw, Terminal, Trash2, Zap } from '../icons'
 import { Agent, api, FailoverPolicy, IntentResolution, ModelProfile, OllamaHost, ProviderItem, ProvidersResponse, RouterTier } from '../api'
 import { Accordion } from './Accordion'
 import { baseName, clears, gb, isEmbedding, variantsOf } from '../models'
@@ -77,6 +77,9 @@ export const ProvidersView: React.FC<Props> = ({ agents, profiles, tiers, scope,
     }).sort((a, b) => Number(!!b.best) - Number(!!a.best) || (b.best?.precision_lo ?? 0) - (a.best?.precision_lo ?? 0) || a.name.localeCompare(b.name))
   }, [ollama, profiles, agents])
   const measuredCount = modelRows.filter((r) => r.best).length
+  const [showUnmeasured, setShowUnmeasured] = useState(false)
+  const restRows = modelRows.filter((r) => !r.best)
+  const visibleRows = showUnmeasured ? modelRows : modelRows.filter((r) => r.best)
 
   const engines: Engine[] = useMemo(() => {
     const out: Engine[] = modelRows.map((r) => ({ value: `ollama::${r.name}`, label: `Local · ${r.name}`, provider: 'ollama', model: r.name, cloud: false }))
@@ -190,7 +193,7 @@ export const ProvidersView: React.FC<Props> = ({ agents, profiles, tiers, scope,
             <table className="tbl prov-models">
               <thead><tr><th>Modelo</th><th className="col-fam">Familia · tamaño</th><th className="col-quant">Cuantización</th><th className="num">Peso</th><th className="num">Precisión</th><th>Cubre</th><th className="actions-col">Acciones</th></tr></thead>
               <tbody>
-                {modelRows.map((r) => {
+                {visibleRows.map((r) => {
                   const cl = r.best ? clears(r.best, tiers) : []
                   return (
                     <tr key={r.name}>
@@ -217,6 +220,11 @@ export const ProvidersView: React.FC<Props> = ({ agents, profiles, tiers, scope,
               </tbody>
             </table>
           </div>
+          {restRows.length > 0 && (
+            <button type="button" className="engine-more" onClick={() => setShowUnmeasured((v) => !v)} aria-expanded={showUnmeasured}>
+              {showUnmeasured ? 'Hide models not measured' : `Show ${restRows.length} models not measured`}<small>the router does not pick them on its own</small>
+            </button>
+          )}
           {Object.entries(smoke).filter(([k]) => k === 'ollama').map(([k, r]) => <div key={k} className="probe-strip"><b className={r.ok ? 'sage' : 'coral'}>{r.ok ? 'Smoke OK' : 'Smoke falló'}</b><span>{r.latency_ms ?? 0} ms</span><span>JSON {r.json_ok ? 'ok' : 'no'}</span><span>Tools {r.tools_ok ? 'ok' : 'no'}</span>{r.error && <span className="coral">{r.error}</span>}</div>)}
 
           {(localGateways.length > 0 || scope === 'global') && (

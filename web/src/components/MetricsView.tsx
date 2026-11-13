@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, GitCompareArrows, RefreshCw } from 'lucide-react'
+import { Download, GitCompareArrows, RefreshCw } from '../icons'
 import { api, MetricsResponse, MetricsSeries, ModelProfile, RouterTier } from '../api'
 
 interface Props {

@@ -84,6 +84,18 @@ const sampleProviders = {
   api_agents: [],
 }
 
+
+/** Opens a view by its tab name: a group tab first (Team or System) when the view lives on a second row. */
+async function openTab(name: RegExp) {
+  let tab = screen.queryByRole('tab', { name })
+  for (const group of [/^Team/, /^System/]) {
+    if (tab) break
+    const g = screen.queryByRole('tab', { name: group })
+    if (g) { fireEvent.click(g); tab = screen.queryByRole('tab', { name }) }
+  }
+  fireEvent.click(tab ?? (await screen.findByRole('tab', { name })))
+}
+
 describe('CAOS v2 unified Web UI', () => {
   beforeEach(() => {
     cleanup()
@@ -148,11 +160,11 @@ describe('CAOS v2 unified Web UI', () => {
     vi.spyOn(api, 'getShareExports').mockResolvedValue({ exports: [], gdrive_connected: false })
   })
 
-  it('orders header 6 tabs correctly and persists sidebar collapse + scope toggle', async () => {
+  it('orders the header in 4 groups correctly and persists sidebar collapse + scope toggle', async () => {
     render(<App />)
     const tablist = await screen.findByRole('tablist', { name: 'Vistas principales' })
     const tabs = within(tablist).getAllByRole('tab')
-    expect(tabs.map((t) => t.getAttribute('data-tab'))).toEqual(['console', 'board', 'providers', 'metrics', 'skills', 'share'])
+    expect(tabs.map((t) => t.getAttribute('data-tab'))).toEqual(['console', 'board', 'team', 'system'])
 
     const sidebar = screen.getByRole('complementary', { name: 'Contexto del proyecto' })
     expect(sidebar.className).toContain('is-expanded')
@@ -192,8 +204,8 @@ describe('CAOS v2 unified Web UI', () => {
     // The intents live in the engine popover now (Ctrl+M or the engine button).
     fireEvent.keyDown(window, { key: 'm', ctrlKey: true })
     const dialog = await screen.findByRole('dialog', { name: 'Elegir motor' })
-    expect(within(dialog).getByText('Locales · Ollama')).toBeInTheDocument()
-    expect(within(dialog).getByText(/Nube · Free tiers/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('tab', { name: /^Local/ })).toBeInTheDocument()   // one list at a time: Auto & agents, Local, Cloud
+    expect(within(dialog).getByRole('tab', { name: /^Cloud/ })).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: /Razonamiento/ }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Elegir motor' })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: /razonar · claude-sonnet-4-5/ })).toBeInTheDocument()
@@ -227,7 +239,7 @@ describe('CAOS v2 unified Web UI', () => {
     expect(localStorage.getItem('caos_board_layout')).toBe('kanban')
     expect(screen.getByText('A revisar')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: /Metrics/i }))
+    await openTab(/Metrics/i)
     await screen.findByText('Éxito de runs')
     expect(screen.getByText('Retorno humano')).toBeInTheDocument()
     expect(screen.getByText('Latencia p50')).toBeInTheDocument()
@@ -262,7 +274,7 @@ describe('CAOS v2 unified Web UI', () => {
     })
 
     render(<App />)
-    fireEvent.click(await screen.findByRole('tab', { name: /Skills & Tools/i }))
+    await openTab(/Skills & Tools/i)
     await screen.findByText('caos-agente-codigo')
 
     fireEvent.click(screen.getByRole('tab', { name: /MCP & Tools/i }))
@@ -275,7 +287,7 @@ describe('CAOS v2 unified Web UI', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Guardar$/ }))
     await waitFor(() => expect(saveSkillSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'ruta-check', description: 'Valida ruta' })))
 
-    fireEvent.click(screen.getByRole('tab', { name: /Share \/ Team/i }))
+    await openTab(/Share \/ Team/i)
     expect(await screen.findByText('Vista previa real')).toBeInTheDocument()
     expect(await screen.findByText('leak.txt')).toBeInTheDocument()                        // excluded, with its reason
     fireEvent.click(await screen.findByRole('button', { name: /Ejecutar Doctor/i }))
@@ -292,7 +304,7 @@ describe('CAOS v2 unified Web UI', () => {
     const intentSpy = vi.spyOn(api, 'saveIntentOverride').mockResolvedValue({} as any)
 
     render(<App />)
-    fireEvent.click(await screen.findByRole('tab', { name: /Models & Providers/i }))
+    await openTab(/Models & Providers/i)
 
     await screen.findByText(/Ollama Multi-Host/i)
     fireEvent.click(screen.getByRole('button', { name: /Host LAN \/ Remoto/i }))
@@ -342,16 +354,16 @@ describe('CAOS v2 unified Web UI', () => {
   it('draws only the emblem on an empty Console, with one row of three starter pills and no preflight card', async () => {
     vi.spyOn(api, 'getSession').mockResolvedValue({ id: 's1', title: 'Despacho QA', project: 'camiones-api', created_at: 1, updated_at: 2, mode: 'plan', commands_enabled: false, messages_count: 0, messages: [] } as any)
     render(<App />)
-    const core = await screen.findByRole('group', { name: /Núcleo CAOS/ })
-    for (const stage of ['Plan', 'Act', 'Verify', 'Review']) expect(within(core).getByRole('button', { name: new RegExp(`^${stage}:`) })).toBeInTheDocument()
-    expect(within(core).getByRole('button', { name: /^Verify: mut 26\/26 · regress pass/ })).toBeInTheDocument()   // read from the real gates
+    const core = await screen.findByRole('region', { name: 'Work cycle' })
+    for (const stage of ['Plan', 'Act', 'Verify', 'Review']) expect(within(core).getByRole('button', { name: new RegExp(`${stage}`) })).toBeInTheDocument()
+    expect(within(core).getByRole('button', { name: /Verify.*mut 26\/26/ })).toBeInTheDocument()   // read from the real gates
     expect(screen.queryByRole('button', { name: 'Topología' })).not.toBeInTheDocument()
     expect(screen.queryByRole('group', { name: 'Diseño del núcleo' })).not.toBeInTheDocument()
     const row = screen.getByRole('group', { name: 'Arranques rápidos' })
     expect(within(row).getAllByRole('button')).toHaveLength(3)
     expect(document.querySelector('.preflight-card')).toBeNull()                           // the preflight lives in the sidebar footer
     expect(within(screen.getByRole('complementary', { name: 'Contexto del proyecto' })).getByText('Listo')).toBeInTheDocument()
-    fireEvent.click(within(core).getByRole('button', { name: /^Act:/ }))
+    fireEvent.click(within(core).getByRole('button', { name: /Act/ }))
     expect(screen.getByRole('button', { name: 'Act' })).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -379,20 +391,20 @@ describe('CAOS v2 unified Web UI', () => {
       ],
       suggested: { name: 'opencode', reason: 'fast', alternatives: ['claude', 'qwen'] },
       default_orchestrator: 'claude',
-      installable: [{ id: 'agy', label: 'Antigravity CLI' }],
+      scouts: [{ name: 'qwen', tier: 'free', model: 'qwen2.5:7b', family: 'local' }], suggested_scout: 'qwen', tiers: {}, installable: [{ id: 'agy', label: 'Antigravity CLI' }],
     }
     const PLAN = {
-      goal: 'Migrar el cliente HTTP', orchestrator: 'claude', pool: ['opencode', 'qwen'], summary: 'Dos frentes en paralelo.', recommended_orchestrator: '', source: 'orchestrator', note: '',
+      goal: 'Migrar el cliente HTTP', orchestrator: 'claude', pool: ['opencode', 'qwen'], scout: null, summary: 'Dos frentes en paralelo.', recommended_orchestrator: '', source: 'orchestrator', note: '',
       subtasks: [
-        { id: 's1', title: 'Mapear llamadas', agent: 'opencode', mode: 'readonly', skill: null, task: 'Lista cada llamada HTTP del repo', criteria: 'Una lista con archivo y línea' },
-        { id: 's2', title: 'Reescribir el cliente', agent: 'qwen', mode: 'isolated', skill: null, task: 'Cambia el cliente a fetch', criteria: 'El diff solo toca el cliente' },
+        { id: 's1', title: 'Mapear llamadas', agent: 'opencode', mode: 'readonly', skill: null, scout: false, task: 'Lista cada llamada HTTP del repo', criteria: 'Una lista con archivo y línea' },
+        { id: 's2', title: 'Reescribir el cliente', agent: 'qwen', mode: 'isolated', skill: null, scout: false, task: 'Cambia el cliente a fetch', criteria: 'El diff solo toca el cliente' },
       ],
     }
     const emptySession = { id: 's1', title: 'Despacho QA', project: 'camiones-api', created_at: 1, updated_at: 2, mode: 'plan', commands_enabled: false, messages_count: 0, messages: [] }
     const runWith = (status: string, phase: string, states: string[]) => ({
       id: 'run-orch', status, model: 'claude', target_kind: 'orchestrate', target: 'claude', task_id: 10, steps: [], answer: phase === 'done' ? 'SINTESIS: todo cumplido' : '', error: '', workspace: '/tmp/x',
       orchestration: { goal: PLAN.goal, orchestrator: 'claude', summary: '', phase, parent_id: 10, synthesis: phase === 'done' ? 'SINTESIS: todo cumplido' : '',
-        subtasks: PLAN.subtasks.map((st, i) => ({ ...st, state: states[i], task_id: 11 + i, worktree: st.mode === 'isolated' ? { key: 'orch-1-s2', path: '/x', branch: 'caos/x' } : null, duration_ms: states[i] === 'delivered' ? 1200 : null, elapsed_ms: 800, result: states[i] === 'delivered' ? `entrega de ${st.agent}` : '', diff: '', error: '', note: '' })) },
+        subtasks: PLAN.subtasks.map((st, i) => ({ ...st, state: states[i], task_id: 11 + i, worktree: st.mode === 'isolated' ? { key: 'orch-1-s2', path: '/x', branch: 'caos/x' } : null, duration_ms: states[i] === 'delivered' ? 1200 : null, elapsed_ms: 800, brief: '', scout_ms: null, scout_cached: false, result: states[i] === 'delivered' ? `entrega de ${st.agent}` : '', diff: '', error: '', note: '' })) },
     })
 
     beforeEach(() => {

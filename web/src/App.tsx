@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, PreflightResponse, ProviderItem, RouterResponse, SessionItem, StateResponse, watchEvents, WorkspaceStatus } from './api'
+import { isDesktop, notifyDesktop, onBackendExit, onDesktopNavigate, openExternalUrl, restartDesktopBackend, syncTrayState, waitForDesktopBackend } from './desktop'
 import { useMedia } from './hooks'
 import { boardCounts, isSpecialKey, View } from './lib'
 import { usePrefs } from './prefs'
+import { SubNav } from './components/SubNav'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { Console } from './components/Console'
@@ -74,6 +76,11 @@ export const App: React.FC = () => {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [prefsOpen, setPrefsOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [desktopMode] = useState<boolean>(() => isDesktop())
+  const [backendReady, setBackendReady] = useState<boolean>(() => !isDesktop())
+  const [backendErr, setBackendErr] = useState<string | null>(null)
+  const [backendPort, setBackendPort] = useState<number | null>(null)
+  const [bootAttempt, setBootAttempt] = useState(0)
   const [preflight, setPreflight] = useState<PreflightResponse | null>(null)
   const [preflightLoading, setPreflightLoading] = useState(false)
   const [preflightOpen, setPreflightOpen] = useState(false)
@@ -136,9 +143,41 @@ export const App: React.FC = () => {
   }, [loadCore, loadMeta])
 
   useEffect(() => {
+    if (!desktopMode) return
+    let alive = true
+    setBackendErr(null)
+    // First boot waits for the engine the shell already started; a retry must start a new one (the failed one is final).
+    const boot = bootAttempt === 0 ? waitForDesktopBackend() : restartDesktopBackend()
+    boot
+      .then((info) => {
+        if (!alive) return
+        setBackendPort(info?.port ?? null)
+        setBackendReady(true)
+      })
+      .catch((e: any) => {
+        if (!alive) return
+        setBackendErr(e?.message || String(e) || 'No se pudo iniciar el motor local Python')
+      })
+    return () => {
+      alive = false
+    }
+  }, [desktopMode, bootAttempt])
+
+  useEffect(() => {
+    if (!desktopMode) return
+    let cleanup: () => void = () => undefined
+    void onBackendExit((detail) => {
+      setBackendReady(false)
+      setBackendErr(`El motor Python se detuvo inesperadamente.${detail ? ` ${detail}` : ''}`)
+    }).then((fn) => { cleanup = fn })
+    return () => cleanup()
+  }, [desktopMode])
+
+  useEffect(() => {
+    if (!backendReady) return
     void loadAll()
     void loadPreflight(false)
-  }, [loadAll, loadPreflight, wsKey])
+  }, [backendReady, loadAll, loadPreflight, wsKey])
 
   const counts = useMemo(() => boardCounts(state), [state])
   const running = !!state?.running
@@ -147,6 +186,7 @@ export const App: React.FC = () => {
   // is up the poll is only a backup (15 s); without it (no EventSource, or the connection dropped) the old rhythm stays.
   const [live, setLive] = useState(false)
   useEffect(() => {
+    if (!backendReady) return
     let last: Record<string, number> | null = null
     let wake = 0
     const handle = watchEvents((v) => {
@@ -161,32 +201,68 @@ export const App: React.FC = () => {
       if (sessionsMoved) void api.getSessions().then((arr) => { if (Array.isArray(arr)) setSessions(arr) }).catch(() => undefined)
     }, setLive)
     return () => { window.clearTimeout(wake); handle?.close(); setLive(false) }
-  }, [loadCore, wsKey])
+  }, [backendReady, loadCore, wsKey])
 
   useEffect(() => {
+    if (!backendReady) return
     const ms = live ? 15000 : running || counts.moving > 0 ? 1800 : 12000
     const timer = window.setInterval(() => {
       void loadCore()
     }, ms)
     return () => window.clearInterval(timer)
-  }, [live, running, counts.moving, loadCore])
+  }, [backendReady, live, running, counts.moving, loadCore])
 
   useEffect(() => {
+    if (!backendReady) return
     const onFocus = () => { void loadCore() }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [loadCore])
+  }, [backendReady, loadCore])
 
   useEffect(() => {
-    if (prefs.notify && counts.needs > prevNeeds.current && 'Notification' in window && Notification.permission === 'granted') {
-      try {
-        new Notification('CAOS · Entrega lista', { body: `${counts.needs} tarea(s) esperando veredicto.` })
-      } catch {
-        /* ignore */
-      }
+    if (prefs.notify && counts.needs > prevNeeds.current) {
+      void notifyDesktop('CAOS · Entrega lista', `${counts.needs} tarea(s) esperando veredicto.`)
     }
     prevNeeds.current = counts.needs
   }, [counts.needs, prefs.notify])
+
+  useEffect(() => {
+    const project = state?.project ?? ''
+    if (typeof document !== 'undefined') {
+      document.title = project ? `CAOS · ${project}` : 'CAOS Desktop'
+    }
+    if (desktopMode && backendReady) {
+      void syncTrayState({ project, needsYou: counts.needs, running: running || counts.moving > 0 })
+    }
+  }, [desktopMode, backendReady, state?.project, counts.needs, counts.moving, running])
+
+  useEffect(() => {
+    if (!desktopMode) return
+    let cleanup: () => void = () => undefined
+    void onDesktopNavigate((target) => {
+      if (target === 'orchestrate') {
+        go('console')
+        return
+      }
+      const next = VIEW_FROM_URL[target.toLowerCase()]
+      if (next) go(next)
+    }).then((fn) => { cleanup = fn })
+    const onLinkClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest('a')
+      if (!a) return
+      const href = a.getAttribute('href') || ''
+      if (a.target === '_blank' || /^https?:\/\//i.test(href)) {
+        if (href.startsWith('http://127.0.0.1:') && a.hasAttribute('download')) return
+        e.preventDefault()
+        void openExternalUrl(href)
+      }
+    }
+    document.addEventListener('click', onLinkClick)
+    return () => {
+      cleanup()
+      document.removeEventListener('click', onLinkClick)
+    }
+  }, [desktopMode, go])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -300,6 +376,27 @@ export const App: React.FC = () => {
     { id: 'a-prefs', group: 'Acciones', label: 'Preferencias', run: () => setPrefsOpen((o) => !o) },
   ], [go, counts.runnable, runPending, sidebarCollapsed, toggleSidebar, preflight])
 
+  if (!backendReady) {
+    return (
+      <div className={`app desktop-boot density-${prefs.density} text-${prefs.text} motion-${prefs.motion}`}>
+        <div className="desktop-boot-card" role="status" aria-live="polite">
+          <div className="desktop-boot-mark" aria-hidden="true">CAOS</div>
+          <h1>{backendErr ? 'Error iniciando motor local' : 'Iniciando estación CAOS'}</h1>
+          <p className="muted">
+            {backendErr || 'Conectando con el servidor Python en loopback, cargando workspace y verificando agentes…'}
+          </p>
+          {backendErr ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setBootAttempt((n) => n + 1)}>
+              Reintentar arranque
+            </button>
+          ) : (
+            <div className="desktop-boot-bar" aria-hidden="true"><span /></div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`app density-${prefs.density} text-${prefs.text} motion-${prefs.motion}`}>
       <a className="skip" href="#main">Saltar al contenido</a>
@@ -352,6 +449,7 @@ export const App: React.FC = () => {
         />
 
         <main id="main" className="main">
+          <SubNav view={view} onView={go} />
           {view === 'console' && (
             <div className="view" key={`console-${wsKey}`}>
               <Console
@@ -435,7 +533,7 @@ export const App: React.FC = () => {
 
       <footer className="foot">
         <span>CAOS · {state?.project || 'workspace'}</span>
-        <span className="muted">alcance {scope === 'project' ? 'proyecto' : 'global'} · {providers.filter((p) => p.status === 'online' || p.status === 'key_present' || p.status === 'ready').length}/{providers.length || 1} motores</span>
+        <span className="muted">alcance {scope === 'project' ? 'proyecto' : 'global'} · {providers.filter((p) => p.status === 'online' || p.status === 'key_present' || p.status === 'ready').length}/{providers.length || 1} motores{desktopMode && backendPort ? ` · desktop:${backendPort}` : ''}</span>
         <span className="muted">⌘K paleta</span>
       </footer>
 

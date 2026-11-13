@@ -2,6 +2,7 @@ import React, { useEffect } from 'react'
 import { Prefs } from '../prefs'
 import { View } from '../lib'
 import { useDialog, usePresence } from '../hooks'
+import { getLang, setLang } from '../i18n'
 
 interface PreferencesProps {
   open: boolean
@@ -35,6 +36,13 @@ export const Preferences: React.FC<PreferencesProps> = ({ open, prefs, onChange,
   return (
     <div className="pop" role="dialog" aria-label="Preferences" ref={ref} data-leaving={pres.leaving ? '' : undefined}>
       <h2>Preferencias</h2>
+      <fieldset>
+        <legend>Language · Idioma</legend>
+        <div className="seg">
+          <button type="button" aria-pressed={getLang() === 'en'} onClick={() => getLang() !== 'en' && setLang('en')}>English</button>
+          <button type="button" aria-pressed={getLang() === 'es'} onClick={() => getLang() !== 'es' && setLang('es')}>Español</button>
+        </div>
+      </fieldset>
       <fieldset>
         <legend>Densidad</legend>
         <div className="seg">

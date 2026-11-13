@@ -11,7 +11,7 @@ import {
   ScanSearch,
   Search,
   X,
-} from 'lucide-react'
+} from '../icons'
 import { Agent, api, GlobalBoardResponse, RouterResponse, StateResponse, Task, TaskDetail } from '../api'
 import { age, byNeed, CLOSED, clock, group, isSpecialKey, NEEDS, pad, queueName, stateLabel } from '../lib'
 import { Accordion } from './Accordion'
@@ -80,7 +80,7 @@ export const Board: React.FC<BoardProps> = ({
   const noteRef = useRef<HTMLInputElement>(null)
 
   const tasks = state?.tasks ?? []
-  const agents: Agent[] = state?.agents ?? []
+  const agents: Agent[] = (state?.agents ?? []).filter((a) => !a.test || a.pending > 0 || a.working > 0)   // test engines (cat) stay out of the pickers until they have work
   const now = state?.now ?? Date.now() / 1000
   const sel = tasks.find((t) => t.id === selectedId) ?? null
 

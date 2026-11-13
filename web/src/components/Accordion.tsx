@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '../icons'
 
 interface AccordionProps {
   id: string

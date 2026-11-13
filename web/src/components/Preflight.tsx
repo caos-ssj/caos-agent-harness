@@ -1,5 +1,5 @@
 import React from 'react'
-import { AlertTriangle, CheckCircle2, CircleDot, KeyRound, RefreshCw, ShieldX, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleDot, KeyRound, RefreshCw, ShieldX, X } from '../icons'
 import { PreflightCheck, PreflightResponse } from '../api'
 import { useDialog, usePresence } from '../hooks'
 

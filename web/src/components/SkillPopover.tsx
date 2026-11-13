@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Wrench } from 'lucide-react'
+import { Check, ChevronDown, Wrench } from '../icons'
 import { SkillInfo } from '../api'
 import { useDialog, usePresence } from '../hooks'
 import { CAT_ACCENT, groupSkills } from '../skillCats'

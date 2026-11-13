@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Download, GitBranch, Sparkles, Trash2 } from 'lucide-react'
+import { Download, GitBranch, Sparkles, Trash2 } from '../icons'
 import { api, WorkspaceStatus, WorktreeInspect } from '../api'
 import { ConfirmButton } from './ConfirmButton'
 

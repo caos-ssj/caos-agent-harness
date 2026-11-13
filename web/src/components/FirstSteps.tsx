@@ -1,5 +1,5 @@
 import React from 'react'
-import { Check, Plus } from 'lucide-react'
+import { Check, Plus } from '../icons'
 import { Agent, Task } from '../api'
 
 interface FirstStepsProps {

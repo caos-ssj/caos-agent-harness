@@ -76,7 +76,7 @@ A free tier has its own rate limits, and some providers say free content may imp
 ```bash
 git clone https://gitlab.com/braynerssj26/caos-agent-harness && cd caos-agent-harness
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-make check               # 376 tests, thresholds, regression gate, demo, router table
+make check               # 394 tests, thresholds, regression gate, demo, router table
 make mutation            # optional and slow: injects 26 faults and counts how many the tests catch
 cd web && npm test && npm run build     # 35 dashboard tests, then the bundle the server ships
 ```

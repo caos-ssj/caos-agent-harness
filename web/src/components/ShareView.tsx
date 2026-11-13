@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, CloudUpload, Copy, FileArchive, ShieldCheck } from 'lucide-react'
+import { Check, CloudUpload, Copy, FileArchive, ShieldCheck } from '../icons'
 import { api, SharePackResponse, SharePreview, ShareDoctorResponse, ShareExportsResponse } from '../api'
 
 type Fmt = 'zip' | 'tar.gz' | 'dir'

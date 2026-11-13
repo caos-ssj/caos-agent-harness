@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Eye, GitBranch, Loader2, Play, Plus, RefreshCw, Square, Trash2, Workflow } from 'lucide-react'
+import { Eye, GitBranch, Loader2, Play, Plus, RefreshCw, Square, Trash2, Workflow } from '../icons'
 import { OrchestrateOptions, OrchestrationPlan, OrchestrationState, OrchestrationSubtask, SkillInfo, SubtaskRun } from '../api'
 import { pad } from '../lib'
 import { DiffViewer } from './DiffViewer'
@@ -34,11 +34,13 @@ interface BarProps {
   pool: string[]
   onOrchestrator: (name: string) => void
   onPool: (pool: string[]) => void
+  scout: string
+  onScout: (scout: string) => void
   onAdd: (id: string) => void
   adding: string | null
 }
 
-export const OrchestrateBar: React.FC<BarProps> = ({ options, orchestrator, pool, onOrchestrator, onPool, onAdd, adding }) => {
+export const OrchestrateBar: React.FC<BarProps> = ({ options, orchestrator, pool, onOrchestrator, onPool, scout, onScout, onAdd, adding }) => {
   const sug = options.suggested
   const showSug = !!sug.name && sug.name !== orchestrator
   const workers = options.pool.filter((a) => a.kind !== 'command' || pool.includes(a.name))
@@ -57,6 +59,16 @@ export const OrchestrateBar: React.FC<BarProps> = ({ options, orchestrator, pool
         <button type="button" className="orch-suggest" onClick={() => onOrchestrator(sug.name!)} title={`Para este objetivo encaja mejor ${sug.name}: ${REASON[sug.reason] ?? sug.reason}`}>
           <span className="dot" aria-hidden="true" />Sugerido: <b>{sug.name}</b> · {REASON[sug.reason] ?? sug.reason}
         </button>
+      )}
+      {options.scouts.length > 0 && (
+        <label className="orch-pick" title="Un modelo gratis o barato lee el repositorio antes y entrega un resumen al agente de pago: el de pago va directo a la tarea y no gasta cuota explorando">
+          <span className="mono muted">Lectura previa</span>
+          <select className="field field-sm" value={scout} onChange={(e) => onScout(e.target.value)} aria-label="Lectura previa gratis">
+            <option value="auto">Automática{options.suggested_scout ? ` · ${options.suggested_scout}` : ''}</option>
+            {options.scouts.map((c) => <option key={c.name} value={c.name}>{c.name} · {c.tier === 'free' ? 'gratis' : 'barato'}</option>)}
+            <option value="off">Sin lectura previa</option>
+          </select>
+        </label>
       )}
       <div className="orch-pool" role="group" aria-label="Subagentes disponibles">
         <span className="mono muted">Subagentes</span>
@@ -100,7 +112,7 @@ export const CriticalDesk: React.FC<DeskProps> = ({ plan, options, skills, canIs
     let n = plan.subtasks.length + 1
     while (used.has(`s${n}`)) n += 1
     const agent = plan.pool.find((a) => options.pool.some((p) => p.name === a)) ?? options.pool[0]?.name ?? plan.orchestrator
-    onChange({ ...plan, source: 'edited', subtasks: [...plan.subtasks, { id: `s${n}`, title: 'Nueva subtarea', agent, mode: 'readonly', skill: null, task: '', criteria: '' }] })
+    onChange({ ...plan, source: 'edited', subtasks: [...plan.subtasks, { id: `s${n}`, title: 'Nueva subtarea', agent, mode: 'readonly', skill: null, depends_on: [], scout: !!plan.scout && options.tiers[agent] === 'paid', task: '', criteria: '' }] })
   }
   const n = plan.subtasks.length
   const incomplete = plan.subtasks.some((s) => !s.task.trim())
@@ -149,6 +161,12 @@ export const CriticalDesk: React.FC<DeskProps> = ({ plan, options, skills, canIs
                 </select>
               </label>
             </div>
+            {plan.scout && (
+              <label className="orch-field wide orch-scout" title={`${plan.scout} lee el repositorio antes y le pasa un resumen a ${s.agent}`}>
+                <input type="checkbox" checked={s.scout} aria-label={`Lectura previa de la subtarea ${i + 1}`} onChange={(e) => edit(i, { scout: e.target.checked })} />
+                <span className="mono muted">Lectura previa por {plan.scout}: {s.agent} va directo a la tarea</span>
+              </label>
+            )}
             <label className="orch-field wide">
               <span className="mono muted">Tarea</span>
               <textarea className="field orch-task" rows={2} value={s.task} aria-label={`Tarea de la subtarea ${i + 1}`} placeholder="Qué debe hacer este agente, acotado y preciso" onChange={(e) => edit(i, { task: e.target.value })} />
@@ -235,6 +253,7 @@ export const OrchestrationLive: React.FC<LiveProps> = ({ orch, live, onOpenTask,
             <p className="orch-crit-line"><span className="mono">Criterio</span> {s.criteria || 'sin criterio'}</p>
             {s.note && <p className="orch-note mono">{s.note}</p>}
             {s.error && <p className="verdict-err" role="alert">{s.error}</p>}
+            {s.brief && <details className="orch-more"><summary>Lectura previa{s.scout_cached ? ' (reutilizada)' : s.scout_ms != null ? ` · ${(s.scout_ms / 1000).toFixed(1)} s` : ''}</summary><pre className="delivered">{s.brief}</pre></details>}
             {s.result && <details className="orch-more"><summary>Entrega</summary><pre className="delivered">{s.result}</pre></details>}
             {s.diff && <details className="orch-more"><summary>Diff · worktree {s.worktree?.key}</summary><DiffViewer diffText={s.diff} /></details>}
           </li>

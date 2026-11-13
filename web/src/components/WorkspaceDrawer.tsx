@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Eye, FileCode2, FilePlus2, FolderGit2, GitBranch, ListChecks, RefreshCw, Trash2, X } from 'lucide-react'
+import { Eye, FileCode2, FilePlus2, FolderGit2, GitBranch, ListChecks, RefreshCw, Trash2, X } from '../icons'
 import { api, ToolStep, WorkspaceDiffResponse, WorkspaceStatus } from '../api'
 import { ToolStepsView } from './ToolStepsView'
 import { WorktreePanel } from './WorktreePanel'

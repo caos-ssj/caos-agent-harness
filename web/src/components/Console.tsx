@@ -15,7 +15,7 @@ import {
   Square,
   X,
   Zap,
-} from 'lucide-react'
+} from '../icons'
 import {
   Agent,
   api,
@@ -38,7 +38,7 @@ import { Prefs } from '../prefs'
 import { catOf, CAT_ACCENT, CAT_ORDER } from '../skillCats'
 import { WorkspaceDrawer } from './WorkspaceDrawer'
 import { ToolStepsView } from './ToolStepsView'
-import { CaosCore, CoreData, CoreStage, SystemFlowDiagram } from './CaosArt'
+import { CoreData, CoreStage, StageRow, SystemFlowDiagram } from './CaosArt'
 import { DiffViewer } from './DiffViewer'
 import { EngineChoice, EnginePopover, IntentId } from './EnginePopover'
 import { SkillPopover } from './SkillPopover'
@@ -109,7 +109,7 @@ export const Console: React.FC<ConsoleProps> = ({
   const [provMeta, setProvMeta] = useState<ProvidersResponse | null>(null)
   const [activeRun, setActiveRun] = useState<ExecutionRun | null>(null)
   const wide = useMedia('(min-width: 1180px)')
-  const [drawerOpen, setDrawerOpen] = useState(() => prefs.inspector && typeof window !== 'undefined' && window.innerWidth >= 1180)
+  const [drawerOpen, setDrawerOpen] = useState(() => prefs.inspector && typeof window !== 'undefined' && window.innerWidth >= 1500)
   const [engineOpen, setEngineOpen] = useState(false)
   const [skillOpen, setSkillOpen] = useState(false)
   const [skillCat, setSkillCat] = useState<string | null>(null)
@@ -149,6 +149,7 @@ export const Console: React.FC<ConsoleProps> = ({
   const [orchOptions, setOrchOptions] = useState<OrchestrateOptions | null>(null)
   const [orchSel, setOrchSel] = useState<string | null>(null)
   const [orchPool, setOrchPool] = useState<string[] | null>(null)
+  const [orchScout, setOrchScout] = useState<string>('auto')   // auto | off | the name of a free or cheap agent
   const [orchPlan, setOrchPlan] = useState<OrchestrationPlan | null>(null)
   const [orchPlanning, setOrchPlanning] = useState(false)
   const [orchAdding, setOrchAdding] = useState<string | null>(null)
@@ -389,7 +390,7 @@ export const Console: React.FC<ConsoleProps> = ({
     setOrchPlanning(true)
     setErr(null)
     try {
-      const plan = await api.planOrchestration({ goal, orchestrator: orch || undefined, pool: poolNames.length ? poolNames : undefined })
+      const plan = await api.planOrchestration({ goal, orchestrator: orch || undefined, pool: poolNames.length ? poolNames : undefined, scout: orchScout })
       setOrchPlan(plan)
       setPrompt('')
     } catch (e: any) {
@@ -397,7 +398,7 @@ export const Console: React.FC<ConsoleProps> = ({
     } finally {
       setOrchPlanning(false)
     }
-  }, [orchestrator, poolNames])
+  }, [orchestrator, poolNames, orchScout])
 
   const launchOrchestration = async () => {
     if (!orchPlan) return
@@ -605,7 +606,7 @@ export const Console: React.FC<ConsoleProps> = ({
   const freshTurns = useFresh(messages.map((m) => m.id))
   const attachRef = useDialog<HTMLDivElement>(attachMenu, () => setAttachMenu(false), { initial: 'input' })
   const approvalRef = useDialog<HTMLDivElement>(awaiting.length > 0, () => { if (awaiting[0]) void decide(awaiting[0].i, false) }, { initial: '[data-safe]' })
-  const filteredAttach = wsFiles.filter((f) => !attachFilter.trim() || f.toLowerCase().includes(attachFilter.trim().toLowerCase())).slice(0, 36)
+  const filteredAttach = wsFiles.filter((f) => !/^(build|dist|node_modules|\.venv|.*\.egg-info)\//.test(f)).filter((f) => !attachFilter.trim() || f.toLowerCase().includes(attachFilter.trim().toLowerCase())).slice(0, 36)
   const canIsolate = !!wsStatus?.git_repo && !!wsStatus?.has_head
 
   // The core's four stages, each read from something real: the plan's open questions, the run in progress, the repository gates, the tasks waiting for you.
@@ -733,8 +734,13 @@ export const Console: React.FC<ConsoleProps> = ({
 
           {messages.length === 0 && !busy && (
             <div className="talk-empty hero">
-              <CaosCore data={coreData} onNode={onCoreNode} onRouter={() => setEngineOpen(true)} />
+              <StageRow data={coreData} onNode={onCoreNode} onRouter={() => setEngineOpen(true)} />
               <p className="hero-caption"><b>{project || 'CAOS Workstation'}</b> · {mode === 'plan' ? 'Plan lee y pregunta, no toca archivos' : mode === 'act' ? 'Act cambia archivos y pide tu aprobación en cada escritura' : 'Orquestar reparte un objetivo entre varios agentes y tú revisas el plan'}</p>
+              <ol className="hero-steps" aria-label="How it works">
+                <li><b>1 · Pick a mode</b><span>Plan reads and asks · Act edits with your approval · Orchestrate splits the goal among a team</span></li>
+                <li><b>2 · Pick the engines</b><span>Free and local models cost nothing; a paid agent starts only after a free scout has read the code for it</span></li>
+                <li><b>3 · Give the verdict</b><span>Nothing closes until you review the delivery on the Board</span></li>
+              </ol>
               <div className="starter-row" role="group" aria-label="Arranques rápidos">
                 {starters.map((st) => (
                   <button key={st.title} type="button" className="starter-chip" onClick={st.run}>
@@ -934,7 +940,7 @@ export const Console: React.FC<ConsoleProps> = ({
             </div>
           )}
           {mode === 'orchestrate' && orchOptions && orchestrator && (
-            <OrchestrateBar options={orchOptions} orchestrator={orchestrator} pool={poolNames} onOrchestrator={setOrchSel} onPool={setOrchPool} onAdd={(id) => void addOrchAgent(id)} adding={orchAdding} />
+            <OrchestrateBar options={orchOptions} orchestrator={orchestrator} pool={poolNames} onOrchestrator={setOrchSel} onPool={setOrchPool} scout={orchScout} onScout={setOrchScout} onAdd={(id) => void addOrchAgent(id)} adding={orchAdding} />
           )}
           <div className="composer">
             {slashOpen && (

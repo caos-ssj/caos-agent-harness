@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronUp, Columns2, Copy, Lock, MessageSquarePlus, Plus, Rows2, Send, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Columns2, Copy, Lock, MessageSquarePlus, Plus, Rows2, Send, X } from '../icons'
 
 interface DiffLine {
   type: 'hunk' | 'add' | 'del' | 'context' | 'note'

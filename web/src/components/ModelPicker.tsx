@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Cpu } from 'lucide-react'
+import { Check, ChevronDown, Cpu } from '../icons'
 import { Agent, ModelProfile, ProviderItem, RouterTier } from '../api'
 import { baseName, clears, gb, isEmbedding, variantsOf } from '../models'
 import { useDialog, usePresence } from '../hooks'

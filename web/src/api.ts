@@ -7,6 +7,8 @@ export interface Agent {
   timeout: number
   pending: number
   working: number
+  /** A plain command, not an AI agent: kept out of the pickers unless it has work. */
+  test?: boolean
 }
 
 export interface TaskRouterInfo {
@@ -443,14 +445,19 @@ export interface OrchestrationSubtask {
   agent: string
   mode: OrchestrationMode
   skill: string | null
+  depends_on: string[]
   task: string
   criteria: string
+  /** A free or cheap agent reads the repository first and hands this subtask a brief. */
+  scout: boolean
 }
 
 export interface OrchestrationPlan {
   goal: string
   orchestrator: string
   pool: string[]
+  /** The agent that reads ahead for the paid ones, or null when nobody does. */
+  scout: string | null
   summary: string
   recommended_orchestrator: string
   subtasks: OrchestrationSubtask[]
@@ -481,6 +488,9 @@ export interface OrchestrateOptions {
   suggested: OrchestratorSuggestion
   default_orchestrator: string | null
   installable: Array<{ id: string; label: string }>
+  scouts: Array<{ name: string; tier: 'free' | 'cheap'; model: string | null; family: string }>
+  suggested_scout: string | null
+  tiers: Record<string, 'free' | 'cheap' | 'paid'>
 }
 
 /** A subtask while it runs and after: the plan's fields plus what the board and the agent produced. */
@@ -490,6 +500,9 @@ export interface SubtaskRun extends OrchestrationSubtask {
   worktree: { key: string; path: string; branch: string } | null
   duration_ms: number | null
   elapsed_ms: number
+  brief: string
+  scout_ms: number | null
+  scout_cached: boolean
   result: string
   diff: string
   error: string
@@ -562,6 +575,21 @@ export interface RepositoryItem {
   current: boolean
 }
 
+let apiBase = ''
+let apiToken: string | null = null
+
+export function setBackendConnection(baseUrl: string, token: string | null): void {
+  apiBase = baseUrl.replace(/\/+$/, '')
+  apiToken = token || null
+}
+
+export function apiUrl(path: string, withToken = false): string {
+  const full = `${apiBase}${path}`
+  if (!withToken || !apiToken) return full
+  const sep = full.includes('?') ? '&' : '?'
+  return `${full}${sep}token=${encodeURIComponent(apiToken)}`
+}
+
 /** Live updates. `EventSource` exists in every browser but not in jsdom (the tests): without it these return null and the caller keeps polling. */
 export const liveSupported = (): boolean => typeof EventSource !== 'undefined'
 
@@ -572,7 +600,7 @@ export interface LiveHandle {
 /** Board, run and session changes as they happen. `onChange` gets the version of each channel; `onState` tells whether the stream is up. */
 export function watchEvents(onChange: (v: Record<string, number>) => void, onState?: (connected: boolean) => void): LiveHandle | null {
   if (!liveSupported()) return null
-  const es = new EventSource('/api/events')
+  const es = new EventSource(apiUrl('/api/events', true))
   es.addEventListener('change', (e) => {
     try {
       onChange(JSON.parse((e as MessageEvent).data))
@@ -588,7 +616,7 @@ export function watchEvents(onChange: (v: Record<string, number>) => void, onSta
 /** One run as it changes, until it ends. Returns null when the browser has no EventSource. */
 export function watchRun(id: string, onRun: (run: ExecutionRun) => void, onState?: (connected: boolean) => void): LiveHandle | null {
   if (!liveSupported()) return null
-  const es = new EventSource(`/api/runs/${id}/events`)
+  const es = new EventSource(apiUrl(`/api/runs/${id}/events`, true))
   const terminal = ['completed', 'failed', 'stopped']
   es.addEventListener('run', (e) => {
     try {
@@ -606,6 +634,9 @@ export function watchRun(id: string, onRun: (run: ExecutionRun) => void, onState
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {})
+  if (apiToken && !headers.has('X-Harness-Token')) {
+    headers.set('X-Harness-Token', apiToken)
+  }
   if (options.method && options.method !== 'GET') {
     headers.set('X-Harness', '1')
     if (!headers.has('Content-Type')) {
@@ -613,7 +644,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
   }
 
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     ...options,
     headers,
   })
@@ -759,7 +790,7 @@ export const api = {
   inspectWorktree: (key: string) => request<WorktreeInspect>(`/api/workspace/worktree?key=${encodeURIComponent(key)}`),
   exportPatch: (key?: string) => request<PatchExport>('/api/workspace/worktree/patch', { method: 'POST', body: JSON.stringify({ key }) }),
   cleanupWorktrees: () => request<{ removed: string[]; kept_busy: string[] }>('/api/workspace/worktree/cleanup', { method: 'POST', body: JSON.stringify({}) }),
-  downloadUrl: (file: string) => `/api/share/download?file=${encodeURIComponent(file)}`,
+  downloadUrl: (file: string) => apiUrl(`/api/share/download?file=${encodeURIComponent(file)}`, true),
   compareProviders: (data: { prompt: string; sides: Array<{ provider: string; model: string }>; confirm_cloud?: boolean }) =>
     request<{ results: Array<{ provider: string; model: string; ok: boolean; latency_ms: number; json_ok: boolean; tool_calls: number; answer: string; prompt_tokens: number; completion_tokens: number; error: string }>; cloud: boolean }>('/api/providers/compare', { method: 'POST', body: JSON.stringify(data) }),
   getMetricsSeries: (scope: 'project' | 'global' = 'project', bucket: 'hour' | 'day' = 'day') => request<MetricsSeries>(`/api/metrics/series?scope=${scope}&bucket=${bucket}`),
@@ -801,7 +832,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
   getOrchestrateOptions: (goal = '') => request<OrchestrateOptions>(`/api/orchestrate/options?goal=${encodeURIComponent(goal.slice(0, 600))}`),
-  planOrchestration: (data: { goal: string; orchestrator?: string; pool?: string[] }) =>
+  planOrchestration: (data: { goal: string; orchestrator?: string; pool?: string[]; scout?: string }) =>
     request<OrchestrationPlan>('/api/orchestrate/plan', { method: 'POST', body: JSON.stringify(data) }),
   launchOrchestration: (sessionId: string, plan: OrchestrationPlan) =>
     request<{ run_id: string; plan: OrchestrationPlan }>('/api/orchestrate/launch', { method: 'POST', body: JSON.stringify({ session_id: sessionId, plan }) }),

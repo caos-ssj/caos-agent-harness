@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Copy, Eye, Pencil, Plus, Search, Wrench } from 'lucide-react'
+import { Copy, Eye, Pencil, Plus, Search, Wrench } from '../icons'
 import { api, SkillInfo, ToolInfo } from '../api'
 import { CAT_ACCENT, CAT_ORDER, catOf, groupSkills } from '../skillCats'
 import { Markdown } from './Markdown'

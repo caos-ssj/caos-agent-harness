@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react'
-import { Activity, Cpu, FolderGit2, Globe, LayoutGrid, PanelLeft, Play, Search, Share2, SlidersHorizontal, Terminal, Wrench } from 'lucide-react'
+import { FolderGit2, Gear, Globe, LayoutGrid, PanelLeft, Play, Search, SlidersHorizontal, Terminal, Users } from '../icons'
 import { CaosMark } from './CaosArt'
 import { View, onTabKeys } from '../lib'
 
@@ -21,13 +21,12 @@ interface HeaderProps {
   onScope: (s: 'project' | 'global') => void
 }
 
-const TABS: Array<{ id: View; label: string; short: string; Icon: React.ElementType }> = [
-  { id: 'console', label: 'Console', short: 'Console', Icon: Terminal },
-  { id: 'board', label: 'Board', short: 'Board', Icon: LayoutGrid },
-  { id: 'providers', label: 'Models & Providers', short: 'Providers', Icon: Cpu },
-  { id: 'metrics', label: 'Metrics', short: 'Metrics', Icon: Activity },
-  { id: 'skills', label: 'Skills & Tools', short: 'Skills', Icon: Wrench },
-  { id: 'share', label: 'Share / Team', short: 'Share', Icon: Share2 },
+/* Six views in four places: the two you work in, and one for each kind of setup. The views of a group share a second row (see SubNav). */
+export const GROUPS: Array<{ id: string; label: string; views: View[]; Icon: React.ElementType }> = [
+  { id: 'console', label: 'Console', views: ['console'], Icon: Terminal },
+  { id: 'board', label: 'Board', views: ['board'], Icon: LayoutGrid },
+  { id: 'team', label: 'Team', views: ['skills', 'share'], Icon: Users },
+  { id: 'system', label: 'System', views: ['providers', 'metrics'], Icon: Gear },
 ]
 
 export const Header: React.FC<HeaderProps> = ({
@@ -77,8 +76,8 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <nav className="tabs" role="tablist" aria-label="Vistas principales" onKeyDown={onTabKeys}>
-        {TABS.map(({ id, label, short, Icon }) => {
-          const active = view === id
+        {GROUPS.map(({ id, label, views, Icon }) => {
+          const active = views.includes(view)
           return (
             <button
               key={id}
@@ -87,12 +86,12 @@ export const Header: React.FC<HeaderProps> = ({
               aria-selected={active}
               tabIndex={active ? 0 : -1}
               data-tab={id}
-              onClick={() => onView(id)}
+              onClick={() => !active && onView(views[0])}
               title={label}
             >
-              <Icon className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />
+              <Icon className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
               <span className="label">{label}</span>
-              <span className="short-label">{short}</span>
+              <span className="short-label">{label}</span>
               {id === 'board' && needsYou > 0 && (
                 <span className="tab-count" title={`${needsYou} esperando veredicto`}>
                   {needsYou}

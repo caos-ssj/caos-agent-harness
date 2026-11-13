@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Cpu, FolderGit2, FolderOpen, GitBranch, MessageSquare, Pencil, Plus, Search, ShieldCheck, Trash2, Wrench } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Cpu, ExternalLink, FolderGit2, FolderOpen, GitBranch, MessageSquare, Pencil, Plus, Search, ShieldCheck, Terminal, Trash2, Wrench } from '../icons'
 import { api, PreflightResponse, ProviderItem, SessionItem, Workspace, WorkspaceStatus } from '../api'
+import { isDesktop, openInFileManager, openInTerminal, pickWorkspaceFolder } from '../desktop'
 import { ago } from '../lib'
 import { ConfirmButton } from './ConfirmButton'
 
@@ -95,6 +96,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setWsErr(err.message || 'Ruta inválida')
     }
   }
+  const desktop = isDesktop()
+  const handlePickFolder = async () => {
+    try {
+      const chosen = await pickWorkspaceFolder(rootPath)
+      if (!chosen) return
+      await api.addWorkspace(chosen, true)
+      await api.switchWorkspace(chosen)
+      setAddingWs(false)
+      setWsOpen(false)
+      setWsErr(null)
+      onSwitchedWorkspace()
+    } catch (err: any) {
+      setWsErr(err.message || 'No se pudo abrir la carpeta')
+    }
+  }
   const openSession = (s: GlobalSession) => {
     if (s.current) onSelectSession(s.id)
     else void handleSwitch(s.workspace_path, s.id)
@@ -148,7 +164,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ))}
           </ul>
           {!addingWs ? (
-            <button type="button" className="btn btn-quiet btn-sm" style={{ width: '100%' }} onClick={() => setAddingWs(true)}><Plus className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Registrar carpeta</button>
+            <div className="sb-ws-actions">
+              {desktop && (
+                <button type="button" className="btn btn-primary btn-sm" style={{ width: '100%' }} onClick={() => void handlePickFolder()}>
+                  <FolderOpen className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Explorar carpeta…
+                </button>
+              )}
+              <button type="button" className="btn btn-quiet btn-sm" style={{ width: '100%' }} onClick={() => setAddingWs(true)}>
+                <Plus className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Registrar ruta manual
+              </button>
+            </div>
           ) : (
             <form className="sb-ws-add" onSubmit={handleAddWorkspace}>
               <input className="field field-sm" value={newPath} onChange={(e) => setNewPath(e.target.value)} placeholder="/ruta/absoluta/proyecto" required autoFocus />
@@ -165,6 +190,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span>{dirtyCount > 0 ? `${dirtyCount} cambio(s) sin confirmar` : 'árbol limpio'}</span>
         </span>
         <span className="sb-repo-row muted"><FolderGit2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /><span>{wtCount > 0 ? `${wtCount} worktree(s) aislado(s)` : 'sin worktrees'}</span></span>
+        {desktop && rootPath && (
+          <div className="sb-repo-bar">
+            <button type="button" className="btn btn-quiet btn-xs" onClick={() => void openInFileManager(rootPath)} title="Abrir carpeta en el gestor de archivos"><ExternalLink className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Carpeta</button>
+            <button type="button" className="btn btn-quiet btn-xs" onClick={() => void openInTerminal(rootPath)} title="Abrir terminal en este proyecto"><Terminal className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Terminal</button>
+          </div>
+        )}
       </div>
 
       <div className="sb-sessions">

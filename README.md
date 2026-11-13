@@ -2,11 +2,26 @@
 
 ![caos-agent-harness](docs/cover.svg)
 
-The harness I run my AI agents with: a **task board** that routes work and holds it for review, a **policy layer** between the model and its tools, a **model router** driven by measured results, **shared memory** over MCP, **role skills**, **evaluation gates**, a **human review queue** for what the system is not sure about, and one **trace** format for every step. Everything reruns with `make`.
+A task board and policy layer for running AI agents you can check.
+
+**What it is.** The harness I run my AI agents with. Each task goes to one queue per agent and is claimed atomically; no delivery closes without a review verdict (`ok`, `redo` or `verify`). A policy guard sits between the model and its tools (allow-list, path limits, budgets), and an answer is rejected unless its citation came from a tool result. A router picks the model by the cost of an error, using the lower bound of a 95 % interval measured on this machine. Memory is shared over MCP, the agent loop runs on two engines (my own and LangGraph), and every step is written to one SQLite trace.
+
+**What it is for.** Running coding and research agents when you need to know what each one did, what it cost and whether the result can be trusted. It works with local models (Ollama), the CLIs you already use (`claude`, `codex`, `opencode`) or your own API keys, and an orchestrator can split a goal into subtasks, let a free model read first and hand the paid model a verified brief.
+
+**Measured.** 394 tests · mutation testing catches 26/26 injected faults · the same agent scores 16–17/20 on both engines against 18/20 for plain retrieval, so the baseline is always measured first.
+
+**What you need.** Python 3.11+, Node.js to build the dashboard, and optionally [Ollama](https://ollama.com) for local models. Provider keys are optional and never written to the repository.
 
 ![The board: queues, tasks and the trace of one task](docs/board.png)
 
 ![Agent vs plain retrieval](docs/agent-results.svg)
+
+## Quick start
+```bash
+pip install -e '.[dev]'     # install
+make check                  # run the tests, validation gates and board demo
+caos-harness serve          # open the dashboard on 127.0.0.1
+```
 
 ## How it fits together
 
@@ -41,7 +56,7 @@ flowchart LR
 | `caos_harness/skills/` + `caos_harness/skills.py` | Role skills (`coder`, `qa`, `writer`, `model-selection` and others): a task queued with a skill is sent with the pointer to it first. Your own skills load from `.harness/skills/` or `CAOS_HARNESS_SKILLS` and never enter the repository | `python -m caos_harness skills` |
 | `caos_harness/app.py` | A project is a folder with `harness.toml`; an agent is any command (reading stdin or using `-p {prompt}`). `caos-harness init`, `task add`, parallel `run`, `review`, `status` | `caos-harness --help` |
 | `caos_harness/orchestrator.py` | Multi-agent orchestration: selectable orchestrator (`claude`, `agy`, `codex`, `opencode`, Ollama) decomposes a goal into editable subtasks, runs `readonly` workers in parallel and `isolated` code edits in temporary `git worktree` checkouts, then writes a synthesis | `caos-harness orchestrate "<goal>" --plan-only` |
-| `caos_harness/web` + `web/` | Local dashboard (React + TypeScript, served on 127.0.0.1 with SSE via `EventBus` / `EventSource`): six views (Console with `Plan \| Act \| Orquestar`, Board with parent/child tasks, Models & Providers, Metrics, Skills & Tools, Share / Team). Keys are never written to `harness.toml`, the board or the repository | `caos-harness serve` |
+| `caos_harness/web` + `web/` | Local dashboard (React + TypeScript, served on 127.0.0.1 with SSE via `EventBus` / `EventSource`): four sections (Console with `Plan \| Act \| Orchestrate`, Board with parent/child tasks, Team with Skills & Tools and Share, System with Models & Providers and Metrics), English by default with a Spanish switch. Keys are never written to `harness.toml`, the board or the repository | `caos-harness serve` |
 | `caos_harness/engines/workstation.py` | Console for a local Ollama model. Shell commands are **off by default** and are switched on per session; then the model may propose a command, and it runs only after the operator approves it. Not a sandbox: see [docs/WORKSTATION.md](docs/WORKSTATION.md) | `caos-harness chat` |
 | `caos_harness/policy` | Tool allow-list, path guard (blocks `..`, absolute paths and `~`), validated arguments, step, tool-call and wall-time budgets | `make test` |
 | `caos_harness/engines` | The agent loop on two engines with one interface, a plain Python loop (`native.py`) and a **LangGraph** state graph (`langgraph_engine.py`), sharing the same policy and checks: a model failure does not crash the run; a citation must come from what a tool returned; a low-relevance citation becomes an abstention | `make test` |
@@ -121,7 +136,7 @@ The tiers are configuration ([`router.json`](caos_harness/router.json)). Precisi
 
 Raw results: [`reports/`](reports/).
 
-## What failed and what changed
+## Findings and changes
 
 - **The agent did not beat plain retrieval.** The 3B model scored 8/20 against 18/20 and the 7B model tied. Here the agent's value is in the policy, the traces and the abstention, so I measure the no-model baseline first.
 - **A first run obeyed a prompt injection** that told it to end with an invented citation. Citations are now rejected unless they came from a tool result.
@@ -130,14 +145,24 @@ Raw results: [`reports/`](reports/).
 - **Two runs of the same eval do not give the same number.** With temperature 0 and a fixed seed, the native engine scored 17/20 and then 16/20. I ran it twice before reading the LangGraph result (16/20) as an engine difference, and it was not one.
 - **Mutation testing found surviving mutants twice.** In the pipeline, writing the missing test exposed a real crash on a null confidence, now fixed and covered. In the board, the concurrency test passed even with the atomic claim removed, because it never forced the race; it now holds every caller at a barrier first.
 
-## Quickstart
+## Read cheap, act once
+
+Paid models spend most of a run reading: every turn resends the history, so each file they open is paid for again. With a **scout**, a free or cheap agent (a local Ollama model, a free OpenCode model) reads the repository first and hands the paid agent a short brief, so it goes straight to the work.
+
+- The planner gets a repository map (files, sizes, symbol line ranges) built by code, at no model cost.
+- A scout with file tools opens the files itself; one without them (Ollama, an API model) is handed the real text of the best-matching definitions, picked by code.
+- The brief is checked by code before a paid agent sees it: every file it cites must exist, and a brief that invents files is discarded.
+- If the scout fails or times out, the paid agent simply runs as it would have.
+- `--scout auto|off|<agent>` on `orchestrate`, or the "Pre-read" selector in the dashboard; each agent can declare `cost = "free" | "cheap" | "paid"` in `harness.toml` (otherwise it is inferred).
+
+## Install and run, in detail
 
 ```bash
 git clone https://gitlab.com/braynerssj26/caos-agent-harness.git && cd caos-agent-harness
 pip install -e '.[dev]'
-make check        # 376 tests, validation thresholds, regression gate, board demo, router table
+make check        # 394 tests, validation thresholds, regression gate, board demo, router table
 make mutation     # optional and slow; the last recorded result is 26/26 injected faults detected
-cd web && npm test && npm run build   # 35 dashboard unit/live tests + production bundle
+cd web && npm test && npm run build   # 41 dashboard unit/live tests + production bundle
 ```
 
 The agent eval also needs [Ollama](https://ollama.com) and a checkout of caos-cerebro: `make agent-eval MODEL=qwen2.5:7b ENGINE=langgraph CEREBRO=/path/to/caos-cerebro` (`ENGINE=native` by default).
@@ -158,7 +183,7 @@ caos-harness serve                                  # the same board in the brow
 
 ### The dashboard
 
-`caos-harness serve` opens the local dashboard (this machine only, streaming updates over Server-Sent Events via `EventBus` / `EventSource`) with six views: **Console** (`Plan`, `Act`, and `Orquestar`, with the engine chooser on `Ctrl+M`), **Board**, **Models & Providers**, **Metrics**, **Skills & Tools** and **Share / Team**. One header switch, `Proyecto | Global`, sets the scope of the views that have one. In **Orquestar**, pick any orchestrator (`claude` default, or `agy`, `codex`, `opencode`, `llama`, `qwen`), review and edit every subtask in the Critical Delegation Desk (`agent`, `skill`, `Lectura (paralelo)` vs `Edición (worktree)`, prompt, and acceptance criterion), run subagents concurrently, and read the orchestrator's synthesis. Isolated worktrees are read, exported as a `.patch` or tidied away, and never merged into your branch. The look is a single copper-obsidian surface tuned for 60fps compositor rendering; the terminal uses matching skins.
+`caos-harness serve` opens the local dashboard (this machine only, streaming updates over Server-Sent Events via `EventBus` / `EventSource`) with four sections: **Console** (`Plan`, `Act`, and `Orchestrate`, with the engine chooser on `Ctrl+M`), **Board**, **Team** (Skills & Tools, Share) and **System** (Models & Providers, Metrics). One header switch, `Project | Global`, sets the scope of the views that have one. In **Orchestrate**, pick any orchestrator (`claude` default, or `agy`, `codex`, `opencode`, `llama`, `qwen`), review and edit every subtask in the Critical Delegation Desk (`agent`, `skill`, `Read (parallel)` vs `Edit (worktree)`, prompt, and acceptance criterion), run subagents concurrently, and read the orchestrator's synthesis. Isolated worktrees are read, exported as a `.patch` or tidied away, and never merged into your branch. The look is a single copper-obsidian surface tuned for 60fps compositor rendering; the terminal uses matching skins.
 
 Cloud providers are optional and keyed by variable name only (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`). The dashboard offers the free models each one lists, and CLI integrations (`claude`, `codex`, `opencode` with `opencode/*-free`, and `agy` via `-p {prompt}`) run without shell interpolation; free tiers have their own limits, so keep private data out of them. [docs/QUICKSTART.md](docs/QUICKSTART.md) has the table and the commands.
 
@@ -179,7 +204,7 @@ Cloud providers are optional and keyed by variable name only (`OPENROUTER_API_KE
 |---|---|
 | ![Metrics: trend and tier matrix](docs/measured-chart.png) | ![Providers: every installed model and what is known about it](docs/providers-models.png) |
 | ![Choosing a model](docs/models.png) | ![Switching workspace](docs/workspaces.png) |
-| ![Console](docs/console.png) | ![Orquestar mode: editable delegation desk](docs/orchestrate.png) |
+| ![Console](docs/console.png) | ![Orchestrate mode: editable delegation desk](docs/orchestrate.png) |
 | ![Skills](docs/skills.png) | ![Share / Team and leak doctor](docs/share.png) |
 
 ### Accounts and local CLIs

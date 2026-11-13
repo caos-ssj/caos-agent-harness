@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Ban, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, FileCode2, FileText, Loader, ShieldAlert, Terminal, Wrench } from 'lucide-react'
+import { Ban, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, FileCode2, FileText, Loader, ShieldAlert, Terminal, Wrench } from '../icons'
 import { ToolStep } from '../api'
 import { stripAnsi } from '../lib'
 

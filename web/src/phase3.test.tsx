@@ -66,7 +66,10 @@ describe('ProvidersView', () => {
 
   it('lists every local model in a table, never hidden behind a count, with its measured precision', async () => {
     view()
-    const table = within(await screen.findByRole('region', { name: 'Modelos locales' })).getByRole('table')
+    const region = await screen.findByRole('region', { name: 'Modelos locales' })
+    const more = within(region).queryByRole('button', { name: /models not measured/ })   // the unmeasured tail is folded, one click away
+    if (more) fireEvent.click(more)
+    const table = within(region).getByRole('table')
     expect(within(table).getByText('qwen2.5:7b')).toBeInTheDocument()
     expect(within(table).getByText('llama3.2:3b')).toBeInTheDocument()
     expect(within(table).getByText('77.8%', { exact: false })).toBeInTheDocument()          // the 95% lower bound

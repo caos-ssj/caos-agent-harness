@@ -228,7 +228,7 @@ a { color: var(--champan); }
 .core-node .core-sub, .core-center .core-sub { fill: var(--ink-2); }
 .hero-caption { color: var(--ink-2); }
 .skill-chips { -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent); mask-image: linear-gradient(90deg, #000 94%, transparent); }
-.trend-axis { font-size: 11px; }
+.trend-axis { font-size: 12.5px; }
 
 /* ── Rendering cost ──────────────────────────────────────────────────────────────────────────────────────────
    Repeated rows and cards are isolated, so a change inside one never re-lays-out the page. Long lists with a stable row height also skip
@@ -278,3 +278,37 @@ a { color: var(--champan); }
   .slash-menu, .palette, .skill-modal, .core-sweep, .core-edge.flowing { animation: none !important; will-change: auto !important; }
   .btn, .card, .prov-card, .skill-item, .starter-chip, .board-row, .tier-mini, .ov-tile, .tabs button, .core-halo, .core-node-bg, .acc-chev { transition-duration: 0.01ms !important; }
 }
+
+/* ── Desktop shell & native OS integration ───────────────────────────────────────────────────────────────── */
+.desktop-boot { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.desktop-boot-card {
+  width: min(440px, 100%);
+  padding: 28px 26px;
+  border-radius: 16px;
+  background: var(--glass-2);
+  border: 1px solid var(--edge-2);
+  box-shadow: var(--lift), var(--shadow-pop);
+  backdrop-filter: var(--blur);
+  display: grid;
+  gap: 12px;
+  text-align: center;
+  justify-items: center;
+}
+.desktop-boot-mark {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  letter-spacing: .24em;
+  color: var(--champan);
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--edge-2);
+  background: rgba(var(--hl), .08);
+}
+.desktop-boot-card h1 { margin: 0; font-size: 18px; color: var(--ink); }
+.desktop-boot-card p { margin: 0; font-size: 14px; line-height: 1.5; }
+.desktop-boot-bar { position: relative; width: 100%; height: 3px; border-radius: 999px; overflow: hidden; background: rgba(var(--edge-rgb), .14); margin-top: 4px; }
+.desktop-boot-bar span { position: absolute; inset: 0 auto 0 0; width: 42%; background: linear-gradient(90deg, transparent, var(--gold), var(--champan), transparent); animation: boot-slide 1.15s ease-in-out infinite; }
+@keyframes boot-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
+.sb-ws-actions { display: grid; gap: 6px; }
+.sb-repo-bar { display: flex; gap: 6px; padding-top: 6px; margin-top: 4px; border-top: 1px solid rgba(var(--edge-rgb), .1); }
+.sb-repo-bar .btn { flex: 1; justify-content: center; }

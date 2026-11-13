@@ -1,6 +1,7 @@
 import React, { useId } from 'react'
 import { ProviderItem, RouterResponse, StateResponse, WorkspaceStatus } from '../api'
 import { View, boardCounts } from '../lib'
+import { Cpu, Eye, ListChecks, Pencil as PencilSimple, ShieldCheck } from '../icons'
 
 /* Custom CAOS hairline marks and live schematic representation.
    Every visual element reflects real harness state. Bone and silver are the steady machinery; the warm amber (#C9975C) is used ONLY where a
@@ -324,4 +325,34 @@ export const CaosMark: React.FC<{ size?: number }> = ({ size = 22 }) => (
     <path d="M12 12L18 6M12 12L6 18" stroke="rgb(var(--hl))" strokeOpacity=".4" strokeWidth="1" strokeLinecap="round" />
     <path d="M12 0.8V3.4" stroke="var(--warm)" strokeWidth="2" strokeLinecap="round" />
   </svg>
+)
+
+
+/* The work cycle as four plain cards: what each stage says right now, and a click that goes there. Replaces the ring: same data, readable. */
+const STAGE_ICON: Record<string, React.FC<{ size?: number; className?: string }>> = { plan: Eye, act: PencilSimple, verify: ShieldCheck, review: ListChecks }
+
+export const StageRow: React.FC<{ data: CoreData; onNode: (id: CoreStage) => void; onRouter: () => void }> = ({ data, onNode, onRouter }) => (
+  <section className="stage-row" aria-label="Work cycle">
+    <ol className="stage-list">
+      {data.nodes.map((n, i) => {
+        const Icon = STAGE_ICON[n.id] ?? Eye
+        const current = (n.id === 'plan' && data.mode === 'plan') || (n.id === 'act' && data.mode === 'act')
+        return (
+          <li key={n.id}>
+            <button type="button" className={`stage tone-${n.tone} ${current ? 'is-current' : ''}`} onClick={() => onNode(n.id as CoreStage)}>
+              <span className="stage-top"><Icon size={20} className="stage-ico" /><span className="stage-n">{i + 1}</span></span>
+              <b>{n.label}</b>
+              <small>{n.detail}</small>
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+    <button type="button" className="stage-engine" onClick={onRouter} title="Change the engine">
+      <Cpu size={16} />
+      <span className={`pip ${data.engineOnline ? 'on' : ''}`} aria-hidden="true" />
+      <b>{data.engine}</b>
+      <small>{data.routerNote}</small>
+    </button>
+  </section>
 )
