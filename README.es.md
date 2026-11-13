@@ -59,9 +59,9 @@ El ciclo de vida es el del tablero con el que coordiné mis propios agentes de c
 ## Uso
 ```bash
 pip install -e '.[dev]'
-make check        # 394 pruebas, umbrales, compuerta de regresión, demo del tablero y tabla del router
+make check        # 400+ pruebas, umbrales, compuerta de regresión, demo del tablero y tabla del router
 make mutation     # 26/26 fallos inyectados detectados
-cd web && npm test && npm run build   # 41 pruebas de interfaz/SSE y bundle de producción
+cd web && npm test && npm run build   # 40+ pruebas de interfaz/SSE y bundle de producción
 python -m caos_harness            # todos los comandos
 ```
 ### El panel

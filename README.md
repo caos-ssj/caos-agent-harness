@@ -8,7 +8,7 @@ A task board and policy layer for running AI agents you can check.
 
 **What it is for.** Running coding and research agents when you need to know what each one did, what it cost and whether the result can be trusted. It works with local models (Ollama), the CLIs you already use (`claude`, `codex`, `opencode`) or your own API keys, and an orchestrator can split a goal into subtasks, let a free model read first and hand the paid model a verified brief.
 
-**Measured.** 394 tests · mutation testing catches 26/26 injected faults · the same agent scores 16–17/20 on both engines against 18/20 for plain retrieval, so the baseline is always measured first.
+**Measured.** 400+ tests · mutation testing catches 26/26 injected faults · the same agent scores 16–17/20 on both engines against 18/20 for plain retrieval, so the baseline is always measured first.
 
 **What you need.** Python 3.11+, Node.js to build the dashboard, and optionally [Ollama](https://ollama.com) for local models. Provider keys are optional and never written to the repository.
 
@@ -87,7 +87,7 @@ One task, from the trace (`python -m caos_harness trace <file.db> task:2`):
   114  review     verdict      -                   ok             matches reference
 ```
 
-The lifecycle is the one of the board I have used to coordinate my own coding agents: 115 tasks between 2026-09-29 and 2026-11-09, 86 of them reviewed (79 accepted, 7 closed as superseded).
+The lifecycle is the one of the board I use every day to coordinate my own coding agents: nothing closes without a verdict, and a delivery that fails review goes back to the queue with the reviewer's note.
 
 **Agent over MCP** (20 answerable questions, 4 out of scope, 4 hostile; local models on CPU, 2026-11-04):
 
@@ -160,9 +160,9 @@ Paid models spend most of a run reading: every turn resends the history, so each
 ```bash
 git clone https://gitlab.com/braynerssj26/caos-agent-harness.git && cd caos-agent-harness
 pip install -e '.[dev]'
-make check        # 394 tests, validation thresholds, regression gate, board demo, router table
+make check        # 400+ tests, validation thresholds, regression gate, board demo, router table
 make mutation     # optional and slow; the last recorded result is 26/26 injected faults detected
-cd web && npm test && npm run build   # 41 dashboard unit/live tests + production bundle
+cd web && npm test && npm run build   # 40+ dashboard unit/live tests + production bundle
 ```
 
 The agent eval also needs [Ollama](https://ollama.com) and a checkout of caos-cerebro: `make agent-eval MODEL=qwen2.5:7b ENGINE=langgraph CEREBRO=/path/to/caos-cerebro` (`ENGINE=native` by default).
