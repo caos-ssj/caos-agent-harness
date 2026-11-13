@@ -130,3 +130,57 @@ def test_providers_info_surfaces_invalid_key_errors_and_state_exposes_api_model(
     by_id = {p["id"]: p for p in api.providers_info()["providers"]}
     assert by_id["anthropic"]["status"] == "invalid_key"
     assert by_id["anthropic"]["key_error"] == "keyring locked"
+
+
+def test_a_redirect_is_never_followed_so_the_credential_stays_with_the_provider():
+    import urllib.request
+    assert providers._NoRedirect().redirect_request(urllib.request.Request("https://a.test"), None, 302, "x", {}, "https://evil.test") is None
+
+
+def test_provider_text_and_exceptions_never_reach_the_user_and_the_key_is_removed(project, monkeypatch):
+    monkeypatch.setenv("MY_KEY", KEY)
+    def leaky(url, headers, body, timeout):
+        return 400, {"error": {"message": "echo " + KEY}}
+    with pytest.raises(providers.ProviderError) as e:
+        providers.ask("openai", "gpt-4o", "hi", KEY, transport=leaky)
+    assert KEY not in str(e.value) and "echo" not in str(e.value)
+    echo = lambda *a: (200, {"choices": [{"message": {"content": "you said " + KEY}}]})
+    assert KEY not in providers.ask("openai", "gpt-4o", "hi", KEY, transport=echo)
+    names = lambda *a: (200, {"data": [{"id": "gpt-4o"}, {"id": "gpt-" + KEY}, {"id": "gpt-sk-" + "a" * 30}]})
+    assert providers.models("openai", KEY, transport=names) == ["gpt-4o"]
+    assert providers.test("openai", "MY_KEY", transport=leaky)["message"] == "OpenAI: the provider answered 400"
+
+
+def test_a_key_with_line_breaks_fails_safely_without_a_traceback(project, monkeypatch):
+    monkeypatch.setenv("MY_KEY", "abc\nBad: header value 123")
+    out = providers.test("anthropic", "MY_KEY", transport=Fake())
+    assert out["ok"] is False and "abc" not in out["message"]
+
+
+def test_a_key_pasted_as_model_or_name_is_refused_and_the_file_is_untouched(project):
+    api = Api(project)
+    before = (project.root / "harness.toml").read_text()
+    with pytest.raises(app.ConfigError):
+        api.add_agent({"kind": "api", "provider": "openai", "model": "sk-" + "a" * 30})
+    assert (project.root / "harness.toml").read_text() == before
+
+
+def test_a_symlinked_harness_toml_is_not_written_through(project, tmp_path):
+    api = Api(project)
+    real = tmp_path / "elsewhere.toml"
+    cfg = project.root / "harness.toml"
+    real.write_text(cfg.read_text())
+    cfg.unlink()
+    cfg.symlink_to(real)
+    with pytest.raises(app.ConfigError, match="plain file"):
+        api.add_agent({"kind": "api", "provider": "openai", "model": "gpt-4o"})
+    assert "gpt-4o" not in real.read_text()
+
+
+def test_saved_custom_providers_never_return_a_stored_key(project, monkeypatch):
+    monkeypatch.setenv("CAOS_HARNESS_HOME", str(project.root / "home"))
+    d = project.root / ".harness"; d.mkdir(exist_ok=True)
+    (d / "custom_providers.json").write_text(json.dumps([{"id": "x", "name": "X", "api_key": KEY, "api_key_env": "X_KEY"}]))
+    rows = providers.custom_providers(root=project.root)
+    assert rows and KEY not in json.dumps(rows) and "api_key" not in rows[0]
+    assert KEY not in (d / "custom_providers.json").read_text()
