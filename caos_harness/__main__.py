@@ -38,7 +38,7 @@ WORK = {
     "discard": "discard <id>: drop a task that is still pending [--json]",
     "status": "counts by status, review and agent (no task text) [--json] [--watch]",
     "chat": 'workstation console: chat [--intent rapido|codigo|razonar|local] [--profile local-first|hybrid|cloud-max] [--skill S] [--provider P] [--model NAME] [--act] [--json] "task"',
-    "orchestrate": 'orchestrate "<goal>" [--orchestrator A] [--agents a,b,c] [--plan-only] [--json]: one agent splits the goal, several work in parallel, the same one writes the synthesis',
+    "orchestrate": 'orchestrate "<goal>" [--orchestrator A] [--agents a,b,c] [--plan-only] [--scout A|auto|off] [--json]: one agent splits the goal, several work in parallel, the same one writes the synthesis',
     "providers": "providers list|add|test|smoke|failover|ollama-hosts [--profile P] [--json]",
     "metrics": "metrics [--project|--global] [--md] [--json] [--watch]",
     "share": "share doctor|preview|pack|upload [--format zip|dir|tar.gz] [--dry-run] [--parent-id ID] [--json]",
@@ -452,11 +452,12 @@ def _work_share(rest: list[str], p) -> int:
 
 # ─ doctor ─
 
-ORCHESTRATE_HELP = """usage: caos-harness orchestrate "<goal>" [--orchestrator A] [--agents a,b,c] [--plan-only] [--json]
+ORCHESTRATE_HELP = """usage: caos-harness orchestrate "<goal>" [--orchestrator A] [--agents a,b,c] [--plan-only] [--scout A|auto|off] [--json]
 
 One agent (the orchestrator) splits the goal into subtasks, each with an agent, a mode and acceptance criteria; the subtasks then run
 at the same time and the orchestrator writes the synthesis from their real deliveries.
 
+  --scout A          a free or cheap agent that reads the repository first and hands each paid agent a brief (default: auto; off to skip)
   --orchestrator A   the agent that plans and synthesises (default: the one suggested for the goal, else claude)
   --agents a,b,c     the agents that may do the work (default: every other agent in harness.toml)
   --plan-only        print the plan and stop; nothing is sent to the workers
@@ -471,18 +472,20 @@ def _print_plan(plan: dict) -> None:
     print(style.heading(f"Plan · orchestrator {plan['orchestrator']} · {plan['source']}") + (f"   {style.dim(plan['summary'])}" if plan.get("summary") else ""))
     if plan.get("note"):
         print(style.dim("  note: " + plan["note"]))
+    if plan.get("scout"):
+        print(style.dim(f"  scout: {plan['scout']} reads first for the paid agents"))
     for s in plan["subtasks"]:
-        print(f"  {style.paint(s['id'], style.CHAMPAN)}  {s['agent']:<10} {s['mode']:<9} {s['title']}")
+        print(f"  {style.paint(s['id'], style.CHAMPAN)}  {s['agent']:<10} {s['mode']:<9} {s['title']}" + (style.dim("  + brief") if s.get("scout") else ""))
         print(style.dim(f"      criteria: {s['criteria'] or '-'}"))
 
 
 def _work_orchestrate(rest: list[str], p) -> int:
     """`orchestrate "<goal>"`: plan with the chosen orchestrator, then (unless --plan-only) run the plan as it is and print the synthesis."""
     from . import app, orchestrator
-    pos = _pos(rest, ("--orchestrator", "--agents"))
+    pos = _pos(rest, ("--orchestrator", "--agents", "--scout"))
     goal = " ".join(pos).strip()
     if not goal:
-        raise app.ConfigError('usage: orchestrate "<goal>" [--orchestrator A] [--agents a,b,c] [--plan-only] [--json]')
+        raise app.ConfigError('usage: orchestrate "<goal>" [--orchestrator A] [--agents a,b,c] [--plan-only] [--scout A|auto|off] [--json]')
     as_json = "--json" in rest
     opts = orchestrator.options(p, goal)
     name = _flag(rest, "--orchestrator") or opts["suggested"]["name"] or opts["default_orchestrator"]
@@ -495,7 +498,7 @@ def _work_orchestrate(rest: list[str], p) -> int:
             raise app.ConfigError(f"unknown agent: {a} (agents: {', '.join(p.agents)})")
     from . import term
     with term.Spinner(f"{name} is planning") as sp:
-        plan = orchestrator.plan_orchestration(p, goal, name, pool)
+        plan = orchestrator.plan_orchestration(p, goal, name, pool, scout=_flag(rest, "--scout") or "auto")
         if plan["source"] == "fallback":
             sp.fail()
     if "--plan-only" in rest:
@@ -691,6 +694,17 @@ def work(cmd: str, rest: list[str], project=None) -> int:
         if cmd == "orchestrate" and ("--help" in rest or "-h" in rest):
             print(ORCHESTRATE_HELP)
             return 0
+        if cmd == "serve":
+            from . import desktop
+            from .web.server import serve
+            desktop_mode = ("--desktop" in rest) or (os.environ.get("CAOS_DESKTOP") == "1")
+            ws_arg = rest[rest.index("--workspace") + 1] if "--workspace" in rest and rest.index("--workspace") + 1 < len(rest) else None
+            port = int(rest[rest.index("--port") + 1]) if "--port" in rest and rest.index("--port") + 1 < len(rest) else 8791
+            if desktop_mode:
+                desktop.ensure_user_path()
+            proj = project or (desktop.resolve_desktop_project(ws_arg) if (desktop_mode or ws_arg) else app.load())
+            token = (rest[rest.index("--token") + 1] if "--token" in rest and rest.index("--token") + 1 < len(rest) else None) or os.environ.get("CAOS_HARNESS_TOKEN") or None
+            return serve(proj, port=port, token=token, desktop_mode=desktop_mode)
         p = project or app.load()
         b = p.board
         if cmd == "orchestrate":
@@ -900,9 +914,6 @@ def work(cmd: str, rest: list[str], project=None) -> int:
                     u = snap.get("usage") or {}
                     print(style.dim(f"\n{'✗ failed' if snap['error'] else '✓ done'} · {len(snap['steps'])} step(s) · {time.monotonic() - t0:.1f} s · {u.get('prompt_tokens', 0)} in / {u.get('completion_tokens', 0)} out tokens"))
             return 1 if snap["error"] else 0
-        if cmd == "serve":
-            from .web.server import serve
-            return serve(p, int(rest[rest.index("--port") + 1]) if "--port" in rest else 8791)
     except (app.ConfigError, ValueError) as e:
         if "--json" in rest:
             _dump({"ok": False, "error": str(e)}, force_indent=False)

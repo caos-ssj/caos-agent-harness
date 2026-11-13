@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,11 @@ CATEGORY_BY_SKILL = {
 }
 
 NON_DEV_SKILLS = {"social-content", "proposals"}
+MAX_INJECT = 6000     # characters of a SKILL.md sent along with a task: enough for the rules, bounded for a prompt passed as one argument
+MAX_CATALOG_DESC = 160
+
+_CACHE: dict = {}     # (path, local, project root) -> (mtime_ns, size, Skill): a SKILL.md is parsed again only when the file changed
+_CACHE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -91,13 +97,27 @@ def parse(path: Path, local: bool = False, project_root: Path | None = None) -> 
     return Skill(name, desc, m.group(2).strip(), path, local=local, category=cat, team_shareable=shareable)
 
 
+def _parse_cached(path: Path, local: bool = False, project_root: Path | None = None) -> Skill:
+    """`parse`, read from disk only when the file is new or changed (same path, size and modification time: same skill)."""
+    st = path.stat()
+    key = (str(path), local, str(project_root) if project_root else None)
+    with _CACHE_LOCK:
+        hit = _CACHE.get(key)
+    if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return hit[2]
+    skill = parse(path, local=local, project_root=project_root)
+    with _CACHE_LOCK:
+        _CACHE[key] = (st.st_mtime_ns, st.st_size, skill)
+    return skill
+
+
 def load_packaged(root: Path | None = None) -> dict[str, Skill]:
     """The skills that ship with the repository."""
-    return {s.name: s for s in (parse(p, local=False) for p in sorted((root or ROOT / "skills").glob("*/SKILL.md")))}
+    return {s.name: s for s in (_parse_cached(p, local=False) for p in sorted((root or ROOT / "skills").glob("*/SKILL.md")))}
 
 
 def local_dirs(project_root: Path | None = None) -> tuple[list[Path], Path | None]:
-    """Where the operator keeps skills of their own: `<project>/.harness/skills` (never committed) and `CAOS_HARNESS_SKILLS`."""
+    """Where the operator keeps skills of their own: `<project>/.harness/skills` (never committed), `<project>/team_skills` (from a Share Pack) and `CAOS_HARNESS_SKILLS`."""
     dirs = [Path(d).expanduser() for d in os.environ.get("CAOS_HARNESS_SKILLS", "").split(":") if d.strip()]
     resolved_project = project_root
     if resolved_project is None:
@@ -107,7 +127,8 @@ def local_dirs(project_root: Path | None = None) -> tuple[list[Path], Path | Non
         except Exception:
             resolved_project = None
     if resolved_project is not None:
-        dirs.insert(0, resolved_project / ".harness" / "skills")
+        # `team_skills/` is where a Share Pack puts the skills it hands a teammate: they load as that project's own skills
+        dirs[0:0] = [resolved_project / ".harness" / "skills", resolved_project / "team_skills"]
     return [d for d in dirs if d.is_dir()], resolved_project
 
 
@@ -119,7 +140,7 @@ def load_all(root: Path | None = None, project_root: Path | None = None) -> dict
         for d in dirs:
             for p in sorted(d.glob("*/SKILL.md")):
                 try:
-                    s = parse(p, local=True, project_root=proj)
+                    s = _parse_cached(p, local=True, project_root=proj)
                 except (ValueError, OSError):
                     continue
                 skills[s.name] = s
@@ -160,6 +181,26 @@ def clone_to_project(project_root: Path, name: str) -> Skill:
     return save_local_skill(project_root, slug, src.description, src.body, src.category)
 
 
-def known(name: str, root: Path | None = None) -> bool:
-    """The board stores a skill by name; check the name before queuing a task with it."""
-    return name in load_all(root)
+def known(name: str, root: Path | None = None, project_root: Path | None = None) -> bool:
+    """The board stores a skill by name; check the name before queuing a task with it. `project_root` names the project whose own
+    skills count; without it the project is the one found from the current folder."""
+    return name in load_all(root, project_root=project_root)
+
+
+def catalog(project_root: Path | None = None) -> list[dict]:
+    """Name, category and a one-line description of every skill: what a planner needs to choose one."""
+    return [{"name": s.name, "category": s.category, "description": " ".join(s.description.split())[:MAX_CATALOG_DESC]}
+            for s in sorted(load_all(project_root=project_root).values(), key=lambda s: (s.category, s.name))]
+
+
+def injection(name: str, project_root: Path | None = None, limit: int = MAX_INJECT) -> str:
+    """The rules of a skill as text to send with a task, for an agent that cannot open SKILL.md itself. Empty when the skill is not
+    known; cut at `limit` characters, and it says so, when the document is longer."""
+    s = load_all(project_root=project_root).get(name)
+    if s is None:
+        return ""
+    body = "\n".join(line.rstrip() for line in s.body.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+    body = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", re.sub(r"\n{3,}", "\n\n", body)).strip()
+    if len(body) > limit:
+        body = body[:limit].rstrip() + f"\n[... SKILL.md cut at {limit} of {len(body)} characters]"
+    return f"--- SKILL '{s.name}' (the content of its SKILL.md: follow these rules) ---\n{body}\n--- END OF SKILL '{s.name}' ---"

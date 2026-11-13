@@ -11,7 +11,9 @@ sending, the timeout, the review step and the trace.
 """
 from __future__ import annotations
 
+import os
 import re
+import signal
 import subprocess
 import threading
 import tomllib
@@ -58,6 +60,7 @@ class Agent:
     provider: str | None = None   # "anthropic" | "openai": an API agent, no command (see providers.py)
     model: str | None = None
     key_env: str | None = None    # the NAME of the environment variable that holds the key, never the key
+    cost: str | None = None       # "free" | "cheap" | "paid": what a call costs; unset, the harness infers it (see scout.cost_tier)
 
 
 @dataclass
@@ -118,11 +121,11 @@ def load(path: Path | None = None) -> Project:
             kenv = a.get("key_env")
             if kenv is not None and not (isinstance(kenv, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{2,63}", kenv)):
                 raise ConfigError(f"agents.{name}.key_env must be an environment variable name, like ANTHROPIC_API_KEY")
-            agents[name] = Agent(name, (), float(a.get("timeout", 300)), a.get("system"), provider, a["model"], kenv)
+            agents[name] = Agent(name, (), float(a.get("timeout", 300)), a.get("system"), provider, a["model"], kenv, a.get("cost"))
             continue
         if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):
             raise ConfigError(f"agents.{name}.command must be a non-empty list of strings")
-        agents[name] = Agent(name, tuple(cmd), float(a.get("timeout", 300)), a.get("system"))
+        agents[name] = Agent(name, tuple(cmd), float(a.get("timeout", 300)), a.get("system"), cost=a.get("cost"))
     b = raw.get("board") or {}
     return Project(root, root / b.get("db", ".harness/board.db"), root / b.get("trace", ".harness/trace.db"), agents)
 
@@ -134,6 +137,58 @@ def init(folder: Path) -> Path:
     path.write_text(EXAMPLE, encoding="utf-8")
     (folder / ".harness").mkdir(exist_ok=True)
     return path
+
+
+class ProcessGroup:
+    """A callable runner that tracks started subprocesses and terminates them on cancel."""
+    def __init__(self):
+        self._procs: set[subprocess.Popen] = set()
+        self._lock = threading.Lock()
+        self._cancelled = False
+
+    def __call__(self, cmd, input="", capture_output=True, text=True, timeout=None, cwd=None, **kwargs):
+        with self._lock:
+            if self._cancelled:
+                raise RuntimeError("Process group is cancelled")
+            p = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE if input is not None else None,
+                stdout=subprocess.PIPE if capture_output else None,
+                stderr=subprocess.PIPE if capture_output else None,
+                text=text,
+                cwd=cwd,
+                start_new_session=True,
+                **kwargs,
+            )
+            self._procs.add(p)
+        try:
+            stdout, stderr = p.communicate(input=input, timeout=timeout)
+            return subprocess.CompletedProcess(cmd, p.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            self._terminate_proc(p)
+            raise
+        except Exception:
+            self._terminate_proc(p)
+            raise
+        finally:
+            with self._lock:
+                self._procs.discard(p)
+
+    def _terminate_proc(self, p: subprocess.Popen) -> None:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+        except Exception:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            procs = list(self._procs)
+        for p in procs:
+            self._terminate_proc(p)
 
 
 class CommandDispatcher:

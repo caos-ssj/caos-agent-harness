@@ -18,7 +18,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .. import activity, app, chat, orchestrator, providers, workspaces, worktrees
+from .. import activity, app, chat, desktop, orchestrator, providers, workspaces, worktrees
 from ..board.core import VERDICTS
 from ..engines.workstation import Run
 from ..router.route import choose, load_profiles, load_tiers
@@ -185,6 +185,15 @@ class TaskRun:
 
 
 class Api:
+    def shutdown(self) -> None:
+        """Stops every active run (and the agent process groups behind them) so closing the app leaves nothing running."""
+        for r in list(self.runs.values()):
+            try:
+                if r.snapshot()["status"] in ACTIVE_RUN:
+                    r.cancel()
+            except Exception:
+                pass
+
     """Everything the dashboard can read or do. Kept apart from HTTP so it is tested directly."""
 
     def __init__(self, project: app.Project):
@@ -331,6 +340,8 @@ class Api:
                 raise app.ConfigError("something is running here; wait for it to finish before switching")
             project = app.load(target / app.CONFIG)
             workspaces.remember(self.p.root)
+            workspaces.remember(project.root)
+            desktop.save_last_workspace(project.root)
             self.p, self.last_run = project, []
             self.commands_on.clear()
             self.trusted_by_session.clear()
@@ -777,7 +788,10 @@ class Api:
         pool = body.get("pool")
         if pool is not None and (not isinstance(pool, list) or not all(isinstance(x, str) for x in pool)):
             raise app.ConfigError("pool must be a list of agent names")
-        plan = orchestrator.plan_orchestration(self.p, goal, name, pool, self.orch_factory)
+        scout = body.get("scout", "auto")
+        if scout is not None and not isinstance(scout, str):
+            raise app.ConfigError("scout must be an agent name, auto or off")
+        plan = orchestrator.plan_orchestration(self.p, goal, name, pool, self.orch_factory, scout)
         plan["suggested"] = opts["suggested"]
         if body.get("auto_execute") is True:
             return self.orchestrate_launch({"session_id": body.get("session_id"), "plan": plan})
@@ -868,6 +882,7 @@ class Api:
                 "timeout": a.timeout,
                 "pending": sum(1 for t in tasks if t["queue"] == a.name and t["status"] == "pending"),
                 "working": sum(1 for t in tasks if t["agent"] == a.name and t["status"] == "sending"),
+                "test": orchestrator.family(a) is None,   # a plain command (cat, a script): a test engine, hidden from the pickers until it has work
             }
             for a in self.p.agents.values()
         ]
@@ -1030,7 +1045,7 @@ class Api:
         return {"started": True}
 
 
-def make_handler(api: Api):
+def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False):
     class Handler(BaseHTTPRequestHandler):
         server_version = "caos-harness"
         timeout = 30
@@ -1038,11 +1053,23 @@ def make_handler(api: Api):
         def log_message(self, *a):
             pass
 
+        def cors_headers(self) -> None:
+            if not desktop_mode:
+                return
+            origin = self.headers.get("Origin")
+            if origin and desktop.is_allowed_origin(origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Harness, X-Harness-Token, Authorization")
+                self.send_header("Access-Control-Max-Age", "600")
+
         def security_headers(self) -> None:
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Content-Security-Policy", CSP)
+            self.cors_headers()
 
         def send_json(self, code: int, obj) -> None:
             body = json.dumps(obj, ensure_ascii=False).encode()
@@ -1075,10 +1102,31 @@ def make_handler(api: Api):
             if not LOOPBACK.match(self.headers.get("Host", "")):
                 self.send_json(403, {"error": "loopback only"})
                 return False
+            origin = self.headers.get("Origin")
+            if desktop_mode and origin and not desktop.is_allowed_origin(origin):
+                self.send_json(403, {"error": "origin not allowed"})
+                return False
             if write and self.headers.get("X-Harness") != "1":
                 self.send_json(403, {"error": "missing X-Harness header"})
                 return False
+            path, _, query_str = self.path.partition("?")
+            if token and path.startswith("/api/"):
+                q_token = (urllib.parse.parse_qs(query_str).get("token") or [None])[0]
+                if not desktop.token_matches(token, self.headers.get("X-Harness-Token"), self.headers.get("Authorization"), q_token):
+                    self.send_json(401, {"error": "unauthorized"})
+                    return False
             return True
+
+        def do_OPTIONS(self):
+            if not LOOPBACK.match(self.headers.get("Host", "")):
+                return self.send_json(403, {"error": "loopback only"})
+            origin = self.headers.get("Origin")
+            if not desktop_mode or not origin or not desktop.is_allowed_origin(origin):
+                return self.send_json(403, {"error": "origin not allowed"})
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.security_headers()
+            self.end_headers()
 
         def do_GET(self):
             self.safely(self._get)
@@ -1348,17 +1396,42 @@ def make_handler(api: Api):
     return Handler
 
 
-def make_server(project: app.Project, port: int = 8791) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(Api(project)))
+def make_server(
+    project: app.Project,
+    port: int = 8791,
+    token: str | None = None,
+    desktop_mode: bool = False,
+) -> ThreadingHTTPServer:
+    api = Api(project)
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(api, token=token, desktop_mode=desktop_mode))
+    httpd.daemon_threads = True
+    httpd.api = api  # type: ignore[attr-defined]
+    return httpd
 
 
-def serve(project: app.Project, port: int = 8791) -> int:
-    httpd = make_server(project, port)
-    print(f"caos-harness · {project.root.name} · http://127.0.0.1:{port}  (Ctrl-C to stop)", flush=True)
+def serve(
+    project: app.Project,
+    port: int = 8791,
+    token: str | None = None,
+    desktop_mode: bool = False,
+) -> int:
+    if desktop_mode:
+        desktop.ensure_user_path()
+    httpd = make_server(project, port, token=token, desktop_mode=desktop_mode)
+    actual_port = httpd.server_address[1]
+    if desktop_mode:
+        print(desktop.format_ready_line(actual_port, desktop=True), flush=True)
+    print(f"caos-harness · {project.root.name} · http://127.0.0.1:{actual_port}  (Ctrl-C to stop)", flush=True)
+    if desktop_mode:
+        desktop.install_shutdown_handlers()
+        desktop.watch_parent()
     try:
         httpd.serve_forever()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print()
     finally:
+        api = getattr(httpd, "api", None)
+        if api is not None:
+            api.shutdown()
         httpd.server_close()
     return 0

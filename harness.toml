@@ -10,28 +10,34 @@ timeout = 30
 
 # Local LLM agents via Ollama
 [agents.llama]
+cost = "free"
 command = ["ollama", "run", "llama3.2:3b"]
 system = "llama3.2:3b"
 timeout = 180
 
 [agents.qwen]
+cost = "free"
 command = ["ollama", "run", "qwen2.5:7b"]
 system = "qwen2.5:7b"
 timeout = 300
 
 [agents.claude]
+cost = "paid"
 command = ["claude", "-p"]
 timeout = 600
 
 [agents.codex]
+cost = "paid"
 command = ["codex", "exec", "-"]
 timeout = 600
 
 # Antigravity CLI: the prompt is the value of -p (placeholder), not stdin
 [agents.agy]
+cost = "paid"
 command = ["agy", "--mode", "accept-edits", "--output-format", "text", "-p", "{prompt}"]
 timeout = 600
 
 [agents.opencode]
+cost = "free"   # scout + claude: free agents read first, paid ones go straight to the work
 command = ["opencode", "run", "-m", "opencode/glm-5.3-flash-free"]
 timeout = 600
