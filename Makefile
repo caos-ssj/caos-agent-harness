@@ -30,6 +30,10 @@ web:             ## build the web dashboard (React + TS + Vite to caos_harness/w
 	cd web && npm run build
 serve:           ## launch the local control plane dashboard on 127.0.0.1:8791
 	$(PY) -m caos_harness serve
-.PHONY: route demo chart test eval regress mutation check benchmark agent-eval calibrate web serve
+desktop-dev:     ## launch the Tauri v2 desktop app against the Vite dev server
+	./web/node_modules/.bin/tauri dev
+desktop-build:   ## build the native Tauri v2 desktop bundle (.deb / .AppImage)
+	./web/node_modules/.bin/tauri build
+.PHONY: route demo chart test eval regress mutation check benchmark agent-eval calibrate web serve desktop-dev desktop-build
 chart:           ## redraw docs/agent-results.svg from reports/agent/*.json
 	$(PY) tools/chart.py reports/agent docs/agent-results.svg

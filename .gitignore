@@ -7,3 +7,5 @@ web/node_modules/
 *.egg-info/
 build/
 .claude/
+src-tauri/target/
+src-tauri/gen/
