@@ -1,5 +1,6 @@
 """The landing gate: a worktree's changes reach the project folder only if they apply cleanly on the project as it is now and the
 verify command passes on exactly that result. Every other outcome must leave the project folder byte for byte as it was."""
+import os
 import subprocess
 import sys
 
@@ -314,8 +315,9 @@ def test_lock_and_unlock_eval_paths_enforce_readonly_permissions_and_discard_cle
     locked = worktrees.lock_eval_paths(wt)
     assert "tests/test_core.py" in locked and "harness.toml" in locked
     assert not ((wt / "tests" / "test_core.py").stat().st_mode & 0o200)
-    with pytest.raises(PermissionError):
-        (wt / "tests" / "test_core.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    if getattr(os, "geteuid", lambda: 1)() != 0:   # root in CI containers bypasses POSIX 0444 write bits
+        with pytest.raises(PermissionError):
+            (wt / "tests" / "test_core.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
 
     # discard unlocks automatically before removing the git worktree
     res = worktrees.discard(root, "locked_wt")

@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from caos_harness import app, skill_eval, skills
+from caos_harness import app, providers, skill_eval, skills
 
 BODY = "# Rules\n\n- Read the file first.\n- Never push without asking. [fixed]\n- Keep changes small.\n"
 
@@ -16,7 +16,8 @@ class Instant:
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
+    monkeypatch.setattr(providers.shutil, "which", lambda b: "/usr/bin/" + b)
     app.init(tmp_path)
     with open(tmp_path / "harness.toml", "a", encoding="utf-8") as f:
         f.write('[agents.worker]\ncommand = ["cat"]\n[agents.reader]\ncost = "free"\ncommand = ["opencode", "run", "-m", "opencode/some-free"]\n')

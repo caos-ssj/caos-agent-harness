@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -91,12 +92,15 @@ def test_cli_detect_and_init_detect_flags(tmp_path):
     proj = tmp_path / "cli-py"
     proj.mkdir()
     (proj / "pyproject.toml").write_text('[project]\nname = "cli-py"\n', encoding="utf-8")
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    cur_pp = os.environ.get("PYTHONPATH", "")
+    env = {**os.environ, "PYTHONPATH": f"{repo_root}{os.pathsep}{cur_pp}" if cur_pp else repo_root}
 
-    dry = subprocess.run([sys.executable, "-m", "caos_harness", "detect", "--no-ollama", "--json"], cwd=proj, capture_output=True, text=True, check=True)
+    dry = subprocess.run([sys.executable, "-m", "caos_harness", "detect", "--no-ollama", "--json"], cwd=proj, env=env, capture_output=True, text=True, check=True)
     data = json.loads(dry.stdout)
     assert data["stacks"] == ["python"] and not (proj / app.CONFIG).exists()
 
-    init = subprocess.run([sys.executable, "-m", "caos_harness", "init", "--detect", "--no-ollama", "--json"], cwd=proj, capture_output=True, text=True, check=True)
+    init = subprocess.run([sys.executable, "-m", "caos_harness", "init", "--detect", "--no-ollama", "--json"], cwd=proj, env=env, capture_output=True, text=True, check=True)
     created = json.loads(init.stdout)
     assert Path(created["created"]).is_file() and created["has_config"] is True
 
