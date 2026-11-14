@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -37,7 +38,8 @@ def detect_stack(folder: Path) -> dict:
         elif shutil.which("pytest"):
             verify = ["pytest", "-q"]
         else:
-            verify = [Path(sys.executable or "python3").name, "-m", "pytest", "-q"]
+            py_name = ("python" if os.name == "nt" else "python3") if getattr(sys, "frozen", False) else Path(sys.executable or "python3").name
+            verify = [py_name, "-m", "pytest", "-q"]
 
     pkg_path = folder / "package.json"
     if pkg_path.is_file():

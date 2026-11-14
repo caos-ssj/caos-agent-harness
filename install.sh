@@ -38,11 +38,20 @@ else
 fi
 
 if [ "$DESKTOP" -eq 1 ]; then
-  for tool in node npm cargo; do
+  for tool in node npm cargo rustc; do
     command -v "$tool" >/dev/null 2>&1 || { echo "Falta '$tool' para compilar CAOS Desktop" >&2; exit 1; }
   done
+  TRIPLE="$(rustc -vV | awk '/^host:/ {print $2}')"
+  mkdir -p src-tauri/binaries
+  .venv/bin/python -m pip install pyinstaller --quiet
+  .venv/bin/python -m PyInstaller --noconfirm --clean --onefile \
+    --name "caos-harness-sidecar-${TRIPLE}" \
+    --distpath src-tauri/binaries \
+    --collect-submodules caos_harness \
+    --collect-data caos_harness \
+    tools/sidecar_entry.py
   (cd web && npm ci && npm run build)
-  ./web/node_modules/.bin/tauri build
+  ./web/node_modules/.bin/tauri build --config src-tauri/tauri.bundle.conf.json
 fi
 
 echo ""

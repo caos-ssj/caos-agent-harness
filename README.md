@@ -43,10 +43,11 @@ cd C:\path\to\your-project
 C:\path\to\caos-agent-harness\.venv\Scripts\caos-harness.exe init --detect
 C:\path\to\caos-agent-harness\.venv\Scripts\caos-harness.exe serve
 ```
-Optional desktop app build (requires Node.js 20+, Rust + MSVC Build Tools, WebView2):
+Optional desktop app build (bundles a standalone Python sidecar into a `.exe` / `.msi` installer; requires Node.js 20+, Rust + MSVC Build Tools, WebView2):
 ```powershell
 .\install.ps1 -Desktop
 ```
+Or download the prebuilt Windows `.exe` / `.msi` (or Linux `.deb` / `.AppImage`) installer directly from the **Actions** tab of `caos-ssj/caos-agent-harness` on GitHub — zero Python, Node, or Rust setup needed.
 
 ## How it fits together
 
