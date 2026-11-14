@@ -21,10 +21,17 @@ command = ["ollama", "run", "qwen2.5:7b"]
 system = "qwen2.5:7b"
 timeout = 300
 
+# Claude Pro (shared weekly quota). The model is always explicit: without --model the CLI takes the account default,
+# which can be the most expensive one. `claude` is the critical-code worker; `haiku` is the minimum paid reviewer.
 [agents.claude]
 cost = "paid"
-command = ["claude", "-p"]
+command = ["claude", "-p", "--model", "sonnet"]
 timeout = 600
+
+[agents.haiku]
+cost = "cheap"
+command = ["claude", "-p", "--model", "haiku"]
+timeout = 300
 
 [agents.codex]
 cost = "paid"
@@ -32,12 +39,26 @@ command = ["codex", "exec", "-"]
 timeout = 600
 
 # Antigravity CLI: the prompt is the value of -p (placeholder), not stdin
+# Main executor (Google AI Pro, flat rate): cost "cheap" so it is preferred over the Claude quota.
 [agents.agy]
-cost = "paid"
-command = ["agy", "--mode", "accept-edits", "--output-format", "text", "-p", "{prompt}"]
+cost = "cheap"
+command = ["agy", "--model", "gemini-4-argon-medium", "--mode", "accept-edits", "--output-format", "text", "-p", "{prompt}"]
+timeout = 900
+
+# OpenCode Zen free models: scout, routine and tests. Free tiers may log what they receive: no client data, no secrets.
+[agents.opencode]
+cost = "free"   # scout + routine: reads first, the paid agent gets a verified brief
+command = ["opencode", "run", "-m", "opencode/deepseek-v4.1-flash-free"]
 timeout = 600
 
-[agents.opencode]
-cost = "free"   # scout + claude: free agents read first, paid ones go straight to the work
-command = ["opencode", "run", "-m", "opencode/glm-5.3-flash-free"]
+[agents.pickle]
+cost = "free"   # tests and verification
+command = ["opencode", "run", "-m", "opencode/big-pickle"]
 timeout = 600
+
+# The landing gate (`caos-harness worktree land <key>`): the command that must pass on project + patch before anything
+# is applied to the project folder. One argv list, no shell. It runs in a staging copy that has no ignored files
+# (.venv, node_modules): {project} is this folder, so its interpreter runs the staging copy's code.
+[landing]
+verify = ["{project}/.venv/bin/python", "-m", "pytest", "-q", "-x"]
+timeout = 900

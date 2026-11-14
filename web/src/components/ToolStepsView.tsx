@@ -68,18 +68,18 @@ export const ToolStepsView: React.FC<ToolStepsViewProps> = ({ steps }) => {
         aria-expanded={groupOpen}
         onClick={() => setGroupOpen((o) => !o)}
       >
-        {groupOpen ? <ChevronDown className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" /> : <ChevronRight className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />}
+        {groupOpen ? <ChevronDown className="icon" aria-hidden="true" /> : <ChevronRight className="icon" aria-hidden="true" />}
         <span className="tool-summary-main">
           <b>{steps.length} {steps.length === 1 ? 'tool step' : 'tool steps'}</b>
           <span className="mono">{kinds}</span>
           {totalMs > 0 && <span className="mono">{totalMs} ms</span>}
         </span>
         <span className={`tool-pill ${summaryState}`}>
-          {summaryState === 'awaiting' && <ShieldAlert className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />}
-          {summaryState === 'running' && <Loader className="icon spin" style={{ width: 13, height: 13 }} aria-hidden="true" />}
-          {summaryState === 'done' && <CheckCircle2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />}
-          {summaryState === 'failed' && <Ban className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />}
-          {summaryState === 'expired' && <Clock className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />}
+          {summaryState === 'awaiting' && <ShieldAlert className="icon icon-sm" aria-hidden="true" />}
+          {summaryState === 'running' && <Loader className="icon spin icon-sm" aria-hidden="true" />}
+          {summaryState === 'done' && <CheckCircle2 className="icon icon-sm" aria-hidden="true" />}
+          {summaryState === 'failed' && <Ban className="icon icon-sm" aria-hidden="true" />}
+          {summaryState === 'expired' && <Clock className="icon icon-sm" aria-hidden="true" />}
           {summaryText}
         </span>
       </button>
@@ -98,15 +98,15 @@ export const ToolStepsView: React.FC<ToolStepsViewProps> = ({ steps }) => {
                   onClick={() => toggleStep(i)}
                 >
                   <span className="tool-item-left">
-                    {isOpen ? <ChevronDown className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /> : <ChevronRight className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />}
-                    <Icon className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+                    {isOpen ? <ChevronDown className="icon icon-sm" aria-hidden="true" /> : <ChevronRight className="icon icon-sm" aria-hidden="true" />}
+                    <Icon className="icon icon-sm" aria-hidden="true" />
                     <b>{step.name}</b>
                     {step.input && <code className="tool-cmd-preview">{step.input}</code>}
                   </span>
                   <span className="tool-item-right">
                     {typeof step.exit_code === 'number' && <span className="chip">exit {step.exit_code}</span>}
-                    {step.duration_ms !== undefined && <span className="tool-ms"><Clock className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />{step.duration_ms}ms</span>}
-                    <span className={`tool-st ${step.status}`}>{step.status === 'running' && <Loader className="icon spin" style={{ width: 12, height: 12 }} aria-hidden="true" />}{STATUS_LABEL[step.status] ?? step.status}</span>
+                    {step.duration_ms !== undefined && <span className="tool-ms"><Clock className="icon icon-xs" aria-hidden="true" />{step.duration_ms}ms</span>}
+                    <span className={`tool-st ${step.status}`}>{step.status === 'running' && <Loader className="icon spin icon-xs" aria-hidden="true" />}{STATUS_LABEL[step.status] ?? step.status}</span>
                   </span>
                 </button>
                 {isOpen && (
@@ -122,7 +122,7 @@ export const ToolStepsView: React.FC<ToolStepsViewProps> = ({ steps }) => {
                         <div className="tool-block-head">
                           <span className="tool-block-label">Output</span>
                           <button type="button" className="btn btn-quiet btn-sm" onClick={(e) => copyOut(i, step.output!, e)}>
-                            {copiedIdx === i ? <Check className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" /> : <Copy className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />}
+                            {copiedIdx === i ? <Check className="icon icon-xs" aria-hidden="true" /> : <Copy className="icon icon-xs" aria-hidden="true" />}
                             {copiedIdx === i ? 'Copied' : 'Copy'}
                           </button>
                         </div>

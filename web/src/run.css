@@ -1,0 +1,61 @@
+/* Run: the verification panel beside the console. Structure and the cycle track; colour and type come from control.css. */
+.run-page { display: grid; gap: 14px; }
+.run-split { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.run-col { display: grid; gap: 14px; min-width: 0; }
+.run-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.run-empty { padding: 14px 2px; color: var(--ink-2); display: grid; gap: 6px; }
+.run-num { text-align: right; }
+.run-waiting { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--edge); }
+.run-waiting:first-of-type { border-top: 0; }
+
+/* The readout: one instrument strip, cells divided by hairlines. */
+.readout { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--edge-2); border-radius: var(--r-md); background: var(--card); }
+.readout > div { padding: 10px 14px 11px; min-width: 0; border-left: 1px solid var(--edge); }
+.readout > div:first-child { border-left: 0; }
+.readout dt { font: 500 11.5px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.readout dd { margin: 5px 0 0; display: grid; gap: 1px; }
+.readout dd b { font: 600 26px/1.05 var(--mono); letter-spacing: -0.02em; color: var(--ink); }
+.readout dd span { font: 400 12px/1.3 var(--mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); } .readout > div:nth-child(3) { border-left: 0; } .readout > div:nth-child(n + 3) { border-top: 1px solid var(--edge); } }
+
+/* One cycle: who, what happened, and the four-step segmented bar. */
+.cycle { display: grid; gap: 10px; padding: 12px 0 13px; border-top: 1px solid var(--edge); }
+.cycle:first-of-type { border-top: 0; padding-top: 4px; }
+.cycle-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cycle-who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.cycle-who b { font-weight: 600; color: var(--ink); }
+.cycle-segbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.seg-hit { width: 100%; display: grid; gap: 5px; justify-items: center; padding: 2px 0; cursor: pointer; text-align: center; background: none; border: 0; color: inherit; font: inherit; }
+.seg-fill { width: 100%; height: 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--edge); transition: filter 0.15s ease; }
+.seg-fill.ok { background: var(--pass); border-color: var(--pass); }
+.seg-fill.bad { background: var(--fail); border-color: var(--fail); }
+.seg-fill.wait { background: var(--wait); border-color: var(--wait); }
+.seg-lbl { font: 500 11px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.seg-hit:hover .seg-lbl { color: var(--ink-2); }
+.cycle-details { margin: 0; }
+.cycle-summary { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; font-size: 12px; color: var(--ink-3); user-select: none; }
+.cycle-details-body { margin-top: 8px; display: grid; gap: 8px; }
+.cycle-step-kv { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--ground); border: 1px solid var(--edge); }
+.cycle-kv-cell { margin: 0; min-width: 0; display: grid; gap: 2px; }
+.cycle-kv-cell dt { font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.cycle-kv-cell dd { margin: 0; font: 500 12px/1.35 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.cycle-kv-cell dd b { font-weight: 500; }
+.cycle-kv-cell.ok dd { color: var(--ink); }
+.cycle-kv-cell.bad dd { color: var(--fail); }
+.cycle-kv-cell.wait dd { color: var(--wait); }
+.cycle-findings { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+.cycle-findings li { padding-left: 12px; border-left: 1px solid var(--fail); }
+.cycle pre, .landed-diff { margin: 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--ground); border: 1px solid var(--edge); font: 400 12.5px/1.5 var(--mono); color: var(--ink-2); max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cycle details summary { cursor: pointer; font-size: 12.5px; }
+.landed-diff { max-height: 340px; white-space: pre; margin-top: 8px; }
+
+/* Instruments inside Revisores and Costes tabs */
+.inst-card { display: grid; gap: 10px; }
+.inst-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+.inst-block { display: grid; gap: 8px; min-width: 0; }
+
+/* Family tag: a square of the family's colour, then the name. */
+.fam { display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px var(--mono); color: var(--ink); white-space: nowrap; }
+.fam i { width: 8px; height: 8px; border-radius: 2px; background: var(--fam, var(--ink-3)); }
+.fam-claude { --fam: var(--fam-claude); } .fam-agy { --fam: var(--fam-gemini); } .fam-codex { --fam: var(--fam-codex); }
+.fam-opencode { --fam: var(--fam-opencode); } .fam-local { --fam: var(--fam-local); } .fam-api { --fam: var(--fam-api); }

@@ -8,6 +8,7 @@ import {
   FolderGit2,
   GitBranch,
   ListPlus,
+  MoreHorizontal,
   Repeat2,
   ShieldAlert,
   ShieldCheck,
@@ -20,6 +21,7 @@ import {
   Agent,
   api,
   ExecutionRun,
+  MissionItem,
   ModelProfile,
   OrchestrateOptions,
   OrchestrationPlan,
@@ -33,7 +35,7 @@ import {
   StateResponse,
   WorkspaceStatus,
 } from '../api'
-import { boardCounts, pad, View } from '../lib'
+import { boardCounts, clock, pad, View } from '../lib'
 import { Prefs } from '../prefs'
 import { catOf, CAT_ACCENT, CAT_ORDER } from '../skillCats'
 import { WorkspaceDrawer } from './WorkspaceDrawer'
@@ -44,6 +46,8 @@ import { EngineChoice, EnginePopover, IntentId } from './EnginePopover'
 import { SkillPopover } from './SkillPopover'
 import { CriticalDesk, OrchestrateBar, OrchestrationLive } from './OrchestratePanel'
 import { useDialog, useFresh, useMedia, usePresence } from '../hooks'
+import { playTone } from '../tones'
+import { FamilyEmblem } from '../emblems'
 
 interface ConsoleProps {
   state?: StateResponse | null
@@ -66,6 +70,15 @@ interface ConsoleProps {
 }
 
 const isFinal = (status?: string) => status === 'completed' || status === 'failed' || status === 'stopped'
+const familyOf = (raw?: string | null): 'claude' | 'agy' | 'codex' | 'opencode' | 'local' | 'api' => {
+  const prov = (raw || '').toLowerCase()
+  return prov.includes('claude') || prov.includes('anthropic') ? 'claude'
+    : prov.includes('gemini') || prov.includes('google') || prov.includes('agy') ? 'agy'
+    : prov.includes('codex') || prov.includes('openai') ? 'codex'
+    : prov.includes('opencode') || prov.includes('openrouter') || prov.includes('deepseek') ? 'opencode'
+    : prov.includes('ollama') || prov.includes('local') ? 'local'
+    : 'api'
+}
 const MAX_POLL_FAILS = 8
 const SAFETY_POLL_MS = 5000   // with the live stream the poll is only a safety net; without it (no EventSource) the run is polled fast
 const FAST_POLL_MS = 600
@@ -111,6 +124,8 @@ export const Console: React.FC<ConsoleProps> = ({
   const wide = useMedia('(min-width: 1180px)')
   const [drawerOpen, setDrawerOpen] = useState(() => prefs.inspector && typeof window !== 'undefined' && window.innerWidth >= 1500)
   const [engineOpen, setEngineOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const optionsRef = useRef<HTMLDivElement>(null)
   const [skillOpen, setSkillOpen] = useState(false)
   const [skillCat, setSkillCat] = useState<string | null>(null)
   const [providerModel, setProviderModel] = useState('')
@@ -148,7 +163,9 @@ export const Console: React.FC<ConsoleProps> = ({
   const [mode, setMode] = useState<'plan' | 'act' | 'orchestrate'>('plan')
   const [orchOptions, setOrchOptions] = useState<OrchestrateOptions | null>(null)
   const [orchSel, setOrchSel] = useState<string | null>(null)
+  const [orchModels, setOrchModels] = useState<Record<string, string>>({})
   const [orchPool, setOrchPool] = useState<string[] | null>(null)
+  const [orchAgentModels, setOrchAgentModels] = useState<Record<string, string>>({})
   const [orchScout, setOrchScout] = useState<string>('auto')   // auto | off | the name of a free or cheap agent
   const [orchPlan, setOrchPlan] = useState<OrchestrationPlan | null>(null)
   const [orchPlanning, setOrchPlanning] = useState(false)
@@ -158,6 +175,8 @@ export const Console: React.FC<ConsoleProps> = ({
   const sidRef = useRef(sid)
   sidRef.current = sid
   const [isolated, setIsolated] = useState(false)
+  const [autoCycle, setAutoCycle] = useState(false)
+  const [missions, setMissions] = useState<MissionItem[]>([])
   const [skill, setSkill] = useState<string>(initialSkill || 'auto')
   const [prompt, setPrompt] = useState('')
   const [queue, setQueue] = useState<string[]>([])
@@ -176,6 +195,7 @@ export const Console: React.FC<ConsoleProps> = ({
   const feedRef = useRef<HTMLDivElement>(null)
   const fieldRef = useRef<HTMLTextAreaElement>(null)
   const routerSummary = useMemo(() => ({ tiers, profiles }), [tiers, profiles])
+  const chatModels = useMemo(() => models.filter((m) => !/embed/i.test(m)), [models])
 
   useEffect(() => {
     if (initialSkill) setSkill(initialSkill)
@@ -241,7 +261,7 @@ export const Console: React.FC<ConsoleProps> = ({
       const s = await api.getSession(id)
       setSession(s)
       // Reloading the session you are in never pulls you out of Orquestar: the server only knows Plan or Act until a plan is launched.
-      if ((s.mode === 'plan' || s.mode === 'act') && !(modeRef.current === 'orchestrate' && id === sidRef.current)) setMode(s.mode)
+      if ((s.mode === 'plan' || s.mode === 'act' || s.mode === 'orchestrate') && !(modeRef.current === 'orchestrate' && id === sidRef.current)) setMode(s.mode)
       if (s.target_kind === 'model' && s.target) setModel(s.target)
       if (s.target_kind === 'provider' && s.target) setProviderPick(s.target)
       onSessionsChanged?.(sessions, id)
@@ -253,6 +273,7 @@ export const Console: React.FC<ConsoleProps> = ({
   useEffect(() => {
     loadSessions()
     loadWorkspaceMeta()
+    api.getMissions().then((r) => setMissions(Array.isArray(r.missions) ? r.missions.slice(0, 3) : [])).catch(() => undefined)
   }, [])
 
   // The sidebar renamed or deleted a session: if the one open is gone, move to the first left (or start a fresh one).
@@ -272,6 +293,7 @@ export const Console: React.FC<ConsoleProps> = ({
   }, [sessionsVersion]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    setOrchPlan(null)
     if (sid) loadSession(sid)
   }, [sid])
 
@@ -298,7 +320,12 @@ export const Console: React.FC<ConsoleProps> = ({
   }, [focusSignal])
 
   useEffect(() => {
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight
+    if (!feedRef.current) return
+    if ((session?.messages?.length ?? 0) === 0 && !activeRun) {
+      feedRef.current.scrollTop = 0
+    } else {
+      feedRef.current.scrollTop = feedRef.current.scrollHeight
+    }
   }, [session?.messages?.length, activeRun?.steps?.length, activeRun?.status])
 
   const resolvedIntent = provMeta?.intents?.[intent]
@@ -330,6 +357,7 @@ export const Console: React.FC<ConsoleProps> = ({
     let timer = 0
     let live: { close: () => void } | null = null
     let ended = false
+    let alertedAwait = false
     const finish = async (r: ExecutionRun) => {
       if (ended) return
       ended = true
@@ -338,6 +366,10 @@ export const Console: React.FC<ConsoleProps> = ({
       if (currentRunId.current !== runId) return   // a newer run took over (Stop and send now): its own tracker owns the state
       setSending(false)
       dispatching.current = false
+      if (r.status === 'failed') playTone('failed')
+      else if (r.cycle?.status === 'rejected') playTone('rejected')
+      else if (r.cycle?.status === 'verify_failed' || r.cycle?.status === 'conflict') playTone('failed')
+      else if (r.cycle?.status === 'landed') playTone('landed')
       await loadSession(curSid)
       loadGates()
       loadWorkspaceMeta()
@@ -348,6 +380,10 @@ export const Console: React.FC<ConsoleProps> = ({
     const apply = (r: ExecutionRun) => {
       pollFails.current = 0
       if (currentRunId.current === runId) setActiveRun(r)
+      if (r.status === 'awaiting_approval' && !alertedAwait) {
+        alertedAwait = true
+        playTone('needs')
+      }
       if (isFinal(r.status)) void finish(r)
     }
     live = watchRun(runId, apply)
@@ -371,10 +407,11 @@ export const Console: React.FC<ConsoleProps> = ({
 
   // ── Orchestrate: plan, edit, launch ──
   const orchestrator = orchSel && orchOptions?.orchestrators.some((o) => o.name === orchSel) ? orchSel : orchOptions?.default_orchestrator ?? orchOptions?.orchestrators[0]?.name ?? ''
+  const activeOrchObj = orchOptions?.orchestrators.find((o) => o.name === orchestrator)
+  const activeOrchModel = orchModels[orchestrator] ?? activeOrchObj?.model ?? ''
   const poolNames = useMemo(() => {
     if (!orchOptions) return [] as string[]
-    const valid = (orchPool ?? []).filter((n) => orchOptions.pool.some((a) => a.name === n))
-    if (orchPool && valid.length) return valid
+    if (orchPool !== null) return orchPool.filter((n) => orchOptions.pool.some((a) => a.name === n))
     const rest = orchOptions.pool.filter((a) => a.capable && a.name !== orchestrator).map((a) => a.name)
     return rest.length ? rest : orchOptions.pool.filter((a) => a.capable).map((a) => a.name)
   }, [orchOptions, orchPool, orchestrator])
@@ -384,13 +421,29 @@ export const Console: React.FC<ConsoleProps> = ({
     if (mode !== 'orchestrate') return
     const t = window.setTimeout(() => void loadOrchOptions(prompt), prompt ? 450 : 0)   // the suggestion follows what is being written
     return () => window.clearTimeout(t)
-  }, [mode, prompt, loadOrchOptions])
+  }, [mode, prompt, project, agents.length, loadOrchOptions])
 
-  const planGoal = useCallback(async (goal: string, orch = orchestrator) => {
+  const planGoal = useCallback(async (goal: string, orch = orchestrator, orchModelOverride?: string | null, poolOverride?: string[]) => {
     setOrchPlanning(true)
     setErr(null)
     try {
-      const plan = await api.planOrchestration({ goal, orchestrator: orch || undefined, pool: poolNames.length ? poolNames : undefined, scout: orchScout })
+      const useOrch = orch || orchestrator
+      const fallbackModel = orchModels[useOrch] ?? orchOptions?.orchestrators.find((o) => o.name === useOrch)?.model ?? undefined
+      const useOrchModel = orchModelOverride !== undefined ? (orchModelOverride || undefined) : fallbackModel
+      const usePool = poolOverride ?? poolNames
+      const workerModels: Record<string, string> = {}
+      for (const name of usePool) {
+        const m = orchAgentModels[name] ?? orchOptions?.pool.find((p) => p.name === name)?.model
+        if (m) workerModels[name] = m
+      }
+      const plan = await api.planOrchestration({
+        goal,
+        orchestrator: useOrch || undefined,
+        orchestrator_model: useOrchModel,
+        pool: usePool.length ? usePool : undefined,
+        agent_models: Object.keys(workerModels).length ? workerModels : undefined,
+        scout: orchScout,
+      })
       setOrchPlan(plan)
       setPrompt('')
     } catch (e: any) {
@@ -398,7 +451,7 @@ export const Console: React.FC<ConsoleProps> = ({
     } finally {
       setOrchPlanning(false)
     }
-  }, [orchestrator, poolNames, orchScout])
+  }, [orchestrator, orchModels, orchOptions, poolNames, orchAgentModels, orchScout])
 
   const launchOrchestration = async () => {
     if (!orchPlan) return
@@ -414,12 +467,14 @@ export const Console: React.FC<ConsoleProps> = ({
       dispatching.current = true
       setSending(true)
       setErr(null)
-      const resp = await api.launchOrchestration(curSid, orchPlan)
-      setOrchPlan(null)
-      await loadSession(curSid)
+      playTone('start')
+      const resp = await api.launchOrchestration(curSid, orchPlan, autoCycle)
       currentRunId.current = resp.run_id
-      setActiveRun(await api.getRun(resp.run_id))
+      const run = await api.getRun(resp.run_id)
+      setOrchPlan(null)
+      setActiveRun(run)
       pollRun(resp.run_id, curSid)
+      void loadSession(curSid)
     } catch (e: any) {
       dispatching.current = false
       setSending(false)
@@ -440,10 +495,24 @@ export const Console: React.FC<ConsoleProps> = ({
     }
   }
 
+  const addLocalOrchAgent = async (mod: string) => {
+    setOrchAdding(`local:${mod}`)
+    try {
+      await api.addAgent({ kind: 'local', model: mod })
+      onBoardChanged()
+      await loadOrchOptions(prompt)
+    } catch (e: any) {
+      setErr(e.message || 'No se pudo añadir el agente')
+    } finally {
+      setOrchAdding(null)
+    }
+  }
+
   const sendText = useCallback(async (rawText: string, overrideMode?: 'plan' | 'act' | 'orchestrate', force = false) => {
     const text = rawText.trim()
     if (!text) return
     if ((overrideMode || mode) === 'orchestrate') {   // the goal is planned, not sent: the person reviews the plan first
+      if (orchPlanning) return
       void planGoal(text)
       return
     }
@@ -464,6 +533,7 @@ export const Console: React.FC<ConsoleProps> = ({
     setSending(true)
     setErr(null)
     setPrompt('')
+    playTone('start')
     const useMode = overrideMode || mode
     try {
       const resp = await api.addMessage(curSid, {
@@ -478,6 +548,7 @@ export const Console: React.FC<ConsoleProps> = ({
         intent: effectiveTarget.intent || undefined,
         profile: effectiveTarget.target_kind === 'intent' ? prefs.profile : undefined,
         isolated,
+        auto_cycle: isolated && useMode === 'act' ? autoCycle : undefined,
       })
       await loadSession(curSid)
       if (resp.run_id) {
@@ -494,7 +565,7 @@ export const Console: React.FC<ConsoleProps> = ({
       setSending(false)
       setErr(e.message || 'No se pudo enviar el mensaje')
     }
-  }, [sid, sending, mode, effectiveTarget, skill, selectionKind, agentOrTier, isolated, prefs.profile, loadSession, pollRun, planGoal])
+  }, [sid, sending, mode, effectiveTarget, skill, selectionKind, agentOrTier, isolated, autoCycle, prefs.profile, loadSession, pollRun, planGoal])
 
   useEffect(() => {
     if (!sending && !dispatching.current && queue.length > 0 && activeRun?.status !== 'awaiting_approval') {
@@ -651,6 +722,50 @@ export const Console: React.FC<ConsoleProps> = ({
   const pickSlash = (name: string) => { setSkill(name); setPrompt(''); setSlashIdx(0); fieldRef.current?.focus() }
   const skillCats = CAT_ORDER.map((c) => [c, skills.filter((sk) => catOf(sk) === c).length] as const).filter(([, n]) => n > 0)
   useEffect(() => { document.documentElement.dataset.mode = mode === 'act' ? 'act' : 'plan' }, [mode])
+  useEffect(() => {
+    if (!optionsOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (optionsRef.current && !optionsRef.current.contains(e.target as Node)) {
+        setOptionsOpen(false)
+        setSkillOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (skillOpen) setSkillOpen(false)
+        else setOptionsOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [optionsOpen, skillOpen])
+  useEffect(() => {
+    const room = document.querySelector<HTMLElement>('.view.room')
+    if (!room) return
+    if (!(busy || orchPlanning)) {
+      if (room.dataset.consoleWorking) {
+        delete room.dataset.consoleWorking
+        if (!room.dataset.stationWorking) room.dataset.working = ''
+      }
+      return
+    }
+    const prov = (mode === 'orchestrate' ? orchestrator : effectiveTarget.provider || effectiveTarget.label).toLowerCase()
+    const fam = familyOf(prov)
+    room.dataset.consoleWorking = fam
+    if (!room.dataset.working) room.dataset.working = fam
+    return () => {
+      if (room.dataset.consoleWorking) {
+        const was = room.dataset.consoleWorking
+        delete room.dataset.consoleWorking
+        if (room.dataset.working === was) room.dataset.working = ''
+      }
+    }
+  }, [busy, orchPlanning, mode, orchestrator, effectiveTarget.provider, effectiveTarget.label])
+  void [coreData, onCoreNode, starters, skillCats, CAT_ACCENT, StageRow, Sparkles, wide]
   const lastAssistantRun = [...messages].reverse().find((m) => m.role === 'assistant')?.run_id
 
   return (
@@ -665,7 +780,7 @@ export const Console: React.FC<ConsoleProps> = ({
           {session && renaming && (
             <form className="rename-form" onSubmit={(e) => { e.preventDefault(); submitRename() }}>
               <input className="field field-sm" autoFocus value={renameText} maxLength={120} onChange={(e) => setRenameText(e.target.value)} />
-              <button type="submit" className="btn btn-primary btn-xs">OK</button>
+              <button type="submit" className="btn btn-xs">OK</button>
             </form>
           )}
 
@@ -678,7 +793,11 @@ export const Console: React.FC<ConsoleProps> = ({
           <EnginePopover
             open={engineOpen}
             onOpenChange={setEngineOpen}
-            label={effectiveTarget.label}
+            label={mode === 'orchestrate'
+              ? (orchestrator
+                ? `${orchestrator}${activeOrchModel ? ` · ${activeOrchModel.split('/').pop()}` : ''}`
+                : 'Sin orquestador')
+              : effectiveTarget.label}
             online={online}
             ollama={ollama}
             cloud={providers.filter((p) => p.id !== 'ollama')}
@@ -692,22 +811,82 @@ export const Console: React.FC<ConsoleProps> = ({
             onPick={pickEngine}
             onProvidersChanged={onProvidersChanged}
             onNavigate={onNavigate}
+            orchestrate={mode === 'orchestrate' && orchOptions
+              ? {
+                  orchestrator,
+                  model: activeOrchModel,
+                  orchestrators: orchOptions.orchestrators,
+                  installable: orchOptions.installable,
+                  adding: orchAdding,
+                  onPick: (name, mod) => {
+                    setOrchSel(name)
+                    if (mod) setOrchModels((prev) => ({ ...prev, [name]: mod }))
+                  },
+                  onAddCli: (id) => void addOrchAgent(id),
+                  onAddLocal: (mod) => void addLocalOrchAgent(mod),
+                }
+              : undefined}
           />
 
-          <SkillPopover skills={skills} value={skill} onPick={setSkill} open={skillOpen} onOpenChange={(o) => { setSkillOpen(o); if (!o) setSkillCat(null) }} category={skillCat} />
-
-          <div className="push">
-            <button type="button" className={`btn btn-quiet btn-xs tb-toggle wt-btn ${isolated ? 'on' : ''}`} disabled={!canIsolate} aria-pressed={isolated} aria-label="Worktree aislado"
-              onClick={() => setIsolated((v) => !v)} title={canIsolate ? 'Worktree: aislar los cambios en una rama git aparte' : 'Worktree necesita un repo git con al menos un commit'}>
-              <GitBranch className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /><span className="tb-label">Worktree</span>
+          <div className="push" ref={optionsRef}>
+            <button
+              type="button"
+              className="btn btn-xs tb-toggle"
+              aria-expanded={optionsOpen}
+              aria-haspopup="dialog"
+              onClick={() => setOptionsOpen((o) => !o)}
+            >
+              <MoreHorizontal className="icon icon-sm" aria-hidden="true" />
+              <span>Opciones</span>
+              {dirtyCount > 0 && <span className="tb-dot" aria-hidden="true" />}
             </button>
-            <button type="button" className={`btn btn-quiet btn-xs tb-toggle ${showPipeline ? 'is-on' : ''}`} aria-pressed={showPipeline} aria-label="Pipeline" onClick={() => setShowPipeline((p) => !p)} title="Pipeline: cómo fluye el trabajo ahora mismo">
-              <Zap className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /><span className="tb-label">Pipeline</span>
-            </button>
-            <button type="button" className={`btn btn-xs tb-toggle ${drawerOpen ? 'is-on' : ''}`} aria-pressed={drawerOpen} aria-label="Inspector" onClick={() => setDrawerOpen((d) => !d)} title={`Inspector: archivos, diff, pasos y worktrees${dirtyCount > 0 ? ` (${dirtyCount} cambios)` : ''}`}>
-              <FolderGit2 className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /><span className="tb-label">Inspector{dirtyCount > 0 ? ` (${dirtyCount})` : ''}</span>
-              {!wide && dirtyCount > 0 && <span className="tb-dot" aria-hidden="true" />}
-            </button>
+            {optionsOpen && (
+              <div className="pop options-pop" role="dialog" aria-label="Opciones">
+                <SkillPopover
+                  skills={skills}
+                  value={skill}
+                  onPick={setSkill}
+                  open={skillOpen}
+                  onOpenChange={(o) => { setSkillOpen(o); if (!o) setSkillCat(null) }}
+                  category={skillCat}
+                />
+                <button
+                  type="button"
+                  className={`btn btn-quiet btn-xs tb-toggle wt-btn ${isolated ? 'on' : ''}`}
+                  disabled={!canIsolate}
+                  aria-pressed={isolated}
+                  aria-label="Worktree aislado"
+                  onClick={() => setIsolated((v) => !v)}
+                  title={canIsolate ? 'Worktree: aislar los cambios en una rama git aparte' : 'Worktree necesita un repo git con al menos un commit'}
+                >
+                  <GitBranch className="icon icon-sm" aria-hidden="true" />
+                  <span className="tb-label">Worktree</span>
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-quiet btn-xs tb-toggle ${showPipeline ? 'is-on' : ''}`}
+                  aria-pressed={showPipeline}
+                  aria-label="Pipeline"
+                  onClick={() => setShowPipeline((p) => !p)}
+                  title="Pipeline: cómo fluye el trabajo ahora mismo"
+                >
+                  <Zap className="icon icon-sm" aria-hidden="true" />
+                  <span className="tb-label">Pipeline</span>
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-xs tb-toggle ${drawerOpen ? 'is-on' : ''}`}
+                  aria-pressed={drawerOpen}
+                  aria-label="Inspector"
+                  onClick={() => setDrawerOpen((d) => !d)}
+                  title={`Inspector: archivos, diff, pasos y worktrees${dirtyCount > 0 ? ` (${dirtyCount} cambios)` : ''}`}
+                >
+                  <FolderGit2 className="icon icon-sm" aria-hidden="true" />
+                  <span className="tb-label">Inspector{dirtyCount > 0 ? ` (${dirtyCount})` : ''}</span>
+                  {dirtyCount > 0 && <span className="tb-dot" aria-hidden="true" />}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -720,7 +899,12 @@ export const Console: React.FC<ConsoleProps> = ({
               {mode === 'act' ? 'Permiso ACT activo: lectura automática, escritura/shell pide confirmación.' : 'Modo PLAN (Acero): solo análisis y preguntas de alineación sin modificar archivos.'}
             </label>
           )}
-          <span className="mono muted">{mode === 'orchestrate' ? `orquesta ${orchestrator || '—'}` : effectiveTarget.label}</span>
+          {((mode === 'act' && isolated) || mode === 'orchestrate') && (
+            <label className="auto-cycle-toggle" title="Al terminar en worktree, revisa con otro agente y aterriza en harness/landed si pasan los tests">
+              <input type="checkbox" checked={autoCycle} onChange={(e) => setAutoCycle(e.target.checked)} />
+              Auto-revisar y aterrizar
+            </label>
+          )}
         </div>
 
         {showPipeline && (
@@ -734,109 +918,174 @@ export const Console: React.FC<ConsoleProps> = ({
 
           {messages.length === 0 && !busy && (
             <div className="talk-empty hero">
-              <StageRow data={coreData} onNode={onCoreNode} onRouter={() => setEngineOpen(true)} />
-              <p className="hero-caption"><b>{project || 'CAOS Workstation'}</b> · {mode === 'plan' ? 'Plan lee y pregunta, no toca archivos' : mode === 'act' ? 'Act cambia archivos y pide tu aprobación en cada escritura' : 'Orquestar reparte un objetivo entre varios agentes y tú revisas el plan'}</p>
-              <ol className="hero-steps" aria-label="How it works">
-                <li><b>1 · Pick a mode</b><span>Plan reads and asks · Act edits with your approval · Orchestrate splits the goal among a team</span></li>
-                <li><b>2 · Pick the engines</b><span>Free and local models cost nothing; a paid agent starts only after a free scout has read the code for it</span></li>
-                <li><b>3 · Give the verdict</b><span>Nothing closes until you review the delivery on the Board</span></li>
-              </ol>
-              <div className="starter-row" role="group" aria-label="Arranques rápidos">
-                {starters.map((st) => (
-                  <button key={st.title} type="button" className="starter-chip" onClick={st.run}>
-                    <Sparkles className="icon" style={{ width: 13, height: 13, color: 'var(--champan)' }} />
-                    <span>{st.title}</span>
-                  </button>
-                ))}
-              </div>
+              {missions.length > 0 && (
+                <section className="missions-wrap" aria-label="Misiones detectadas">
+                  <div className="missions-head">
+                    <h2>Misiones detectadas en el repo</h2>
+                    <span className="mono muted">{`${missions.slice(0, 3).length} sugeridas`}</span>
+                  </div>
+                  <div className="mission-grid">
+                    {missions.slice(0, 3).map((ms) => (
+                      <div key={ms.id} className="mission-card">
+                        <span className="mission-card-top">
+                          <b>{ms.title}</b>
+                          <span className={`pill-mini ${ms.mode === 'act' ? 'amber' : 'steel'}`}>{ms.mode.toUpperCase()}</span>
+                        </span>
+                        <p className="mission-why">{ms.subtitle}</p>
+                        {ms.citations && ms.citations.length > 0 && (
+                          <span className="mission-cites">
+                            {ms.citations.slice(0, 2).map((c) => (
+                              <span key={c} className="mission-cite">{c}</span>
+                            ))}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => {
+                            void switchMode(ms.mode)
+                            void sendText(ms.prompt, ms.mode)
+                          }}
+                        >
+                          Lanzar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
 
           {messages.map((m, mi) => {
             const prevAssistant = m.role === 'assistant' ? [...messages.slice(0, mi)].reverse().find((x) => x.role === 'assistant') : undefined
             const changed = !!prevAssistant && (prevAssistant.provider !== m.provider || prevAssistant.model !== m.model)
+            const fam = familyOf(m.family || m.provider || 'ollama')
             return (
-            <React.Fragment key={m.id}>
-            {changed && prevAssistant && (
-              <div className="engine-divider" role="separator" aria-label="Cambio de motor">
-                <Repeat2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />
-                <span>Motor: {prevAssistant.provider || 'ollama'} · {prevAssistant.model || 'auto'} → <b>{m.provider || 'ollama'} · {m.model || 'auto'}</b></span>
-              </div>
-            )}
-            <article className={`turn ${m.role === 'user' ? 'me' : ''} ${freshTurns.has(m.id) ? 'fresh' : ''}`}>
-              <div className="turn-head">
-                <b>{m.role === 'user' ? 'Tú' : `${m.provider || 'ollama'}${m.model ? ` · ${m.model}` : ''}`}</b>
-                <span>
-                  {m.task_id != null && (
-                    <button type="button" className="task-badge-btn" onClick={() => onOpenTask?.(m.task_id!)}>
-                      Task #{pad(m.task_id)} →
-                    </button>
+              <React.Fragment key={m.id}>
+                {changed && prevAssistant && (
+                  <div className="engine-divider" role="separator" aria-label="Cambio de motor">
+                    <Repeat2 className="icon icon-sm" aria-hidden="true" />
+                    <span>Motor: {prevAssistant.provider || 'ollama'} · {prevAssistant.model || 'auto'} → <b>{m.provider || 'ollama'} · {m.model || 'auto'}</b></span>
+                  </div>
+                )}
+                <div className={`turn-row ${m.role === 'user' ? 'me' : 'agent'}`}>
+                  {m.role === 'assistant' && (
+                    <div className="turn-byline" data-family={fam}>
+                      <FamilyEmblem family={m.family || m.provider} size={15} />
+                      <span className="byline-who">{m.provider || 'ollama'}{m.model ? ` · ${m.model}` : ''}</span>
+                      {m.timestamp ? <span className="mono muted">{clock(m.timestamp)}</span> : null}
+                      {m.duration_ms != null && (
+                        <span className="chip">{(m.duration_ms / 1000).toFixed(1)} s</span>
+                      )}
+                      {m.cost_tier && (
+                        <span className={`pill-mini ${m.cost_tier === 'free' ? 'sage' : m.cost_tier === 'paid' ? 'amber' : ''}`}>
+                          {m.cost_tier === 'free' ? 'gratis' : m.cost_tier === 'paid' ? 'de pago' : 'bajo coste'}
+                        </span>
+                      )}
+                      {m.scout_agent && (
+                        <span className="pill-mini steel" title={`Lectura previa por scout ${m.scout_agent}`}>
+                          Scout: {m.scout_agent}
+                        </span>
+                      )}
+                      {m.agent && m.agent !== 'auto' && <span className="mono muted">{m.agent}</span>}
+                      {m.task_id != null && (
+                        <button type="button" className="task-badge-btn" onClick={() => onOpenTask?.(m.task_id!)}>
+                          Task #{pad(m.task_id)} →
+                        </button>
+                      )}
+                    </div>
                   )}
-                  {m.attached && m.attached.length > 0 && ` · @${m.attached.length}`}
-                  {m.agent && m.agent !== 'auto' ? ` · ${m.agent}` : ''}
-                </span>
-              </div>
-              {m.tool_steps && m.tool_steps.length > 0 && !m.orchestration && <ToolStepsView steps={m.tool_steps} />}
-              {m.orchestration ? <OrchestrationLive orch={m.orchestration} live={false} onOpenTask={onOpenTask} /> : <div className="turn-body">{m.content}</div>}
-
-              {m.questions && m.questions.length > 0 && (
-                <div className="plan-qa-card">
-                  <div className="plan-qa-head">Preguntas de alineación (Plan)</div>
-                  {m.questions.map((q, qi) => (
-                    <div key={qi} className="plan-q-item">
-                      <span className="plan-q-text">{qi + 1}. {q.question}</span>
-                      <div className="plan-q-chips">
-                        {(q.chips || []).map((ch) => (
+                  <article className={`turn ${m.role === 'user' ? 'me' : ''} ${freshTurns.has(m.id) ? 'fresh' : ''}`}>
+                    {m.orchestration ? <OrchestrationLive orch={m.orchestration} live={false} onOpenTask={onOpenTask} /> : <div className="turn-body">{m.content}</div>}
+                    {m.role === 'user' && m.attached && m.attached.length > 0 && (
+                      <div className="turn-meta mono muted">{`@${m.attached.length}`}</div>
+                    )}
+                    {m.tool_steps && m.tool_steps.length > 0 && !m.orchestration && (
+                      <details className="turn-steps-fold">
+                        <summary>{m.tool_steps.length === 1 ? '1 paso' : `${m.tool_steps.length} pasos`}</summary>
+                        <ToolStepsView steps={m.tool_steps} />
+                      </details>
+                    )}
+                    {m.role === 'assistant' && m.citations && m.citations.length > 0 && (
+                      <div className="turn-cites" aria-label="Citas verificadas">
+                        {m.citations.map((ref) => (
                           <button
-                            key={ch}
+                            key={ref}
                             type="button"
-                            className={`qa-chip ${planAnswers[q.question] === ch ? 'selected' : ''}`}
-                            onClick={() => setPlanAnswers((cur) => ({ ...cur, [q.question]: ch }))}
+                            className="cite-chip"
+                            title={`Citar ${ref} y abrir Inspector`}
+                            onClick={() => {
+                              setDrawerOpen(true)
+                              setPrompt((cur) => (cur.includes(ref) ? cur : cur ? `${cur} @${ref} ` : `@${ref} `))
+                              fieldRef.current?.focus()
+                            }}
                           >
-                            {ch}
+                            {ref}
                           </button>
                         ))}
                       </div>
-                    </div>
-                  ))}
-                  <div className="plan-qa-foot">
-                    <button type="button" className="btn btn-primary btn-xs" onClick={() => passToActWithAnswers(m.questions!)}>
-                      Pasar a Act con respuestas
-                    </button>
-                  </div>
-                </div>
-              )}
+                    )}
 
-              {m.diff && <DiffViewer diffText={m.diff} onSendDrafts={(txt) => setPrompt((cur) => (cur ? `${cur}\n${txt}` : txt))} annotateLabel="Citar en seguimiento" />}
+                    {m.questions && m.questions.length > 0 && (
+                      <div className="plan-qa-card">
+                        <div className="plan-qa-head">Preguntas de alineación (Plan)</div>
+                        {m.questions.map((q, qi) => (
+                          <div key={qi} className="plan-q-item">
+                            <span className="plan-q-text">{qi + 1}. {q.question}</span>
+                            <div className="plan-q-chips">
+                              {(q.chips || []).map((ch) => (
+                                <button
+                                  key={ch}
+                                  type="button"
+                                  className={`qa-chip ${planAnswers[q.question] === ch ? 'selected' : ''}`}
+                                  onClick={() => setPlanAnswers((cur) => ({ ...cur, [q.question]: ch }))}
+                                >
+                                  {ch}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <div className="plan-qa-foot">
+                          <button type="button" className="btn btn-primary btn-xs" onClick={() => passToActWithAnswers(m.questions!)}>
+                            Pasar a Act con respuestas
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
-              {m.role === 'assistant' && (
-                <div className="turn-act">
-                  {m.task_id != null && !quickReviewed[m.task_id] && (
-                    <>
-                      <button type="button" onClick={() => quickVerdict(m.task_id!, 'ok')}><CheckCircle2 className="icon" style={{ width: 13, height: 13 }} />Aceptar #{pad(m.task_id)}</button>
-                      <button type="button" onClick={() => quickVerdict(m.task_id!, 'redo')}><ShieldAlert className="icon" style={{ width: 13, height: 13 }} />Devolver</button>
-                    </>
-                  )}
-                  <button type="button" onClick={() => { navigator.clipboard.writeText(m.content); setCopiedId(m.id); setTimeout(() => setCopiedId(null), 1200) }}>
-                    {copiedId === m.id ? <Check className="icon" style={{ width: 13, height: 13 }} /> : <Copy className="icon" style={{ width: 13, height: 13 }} />}
-                    {copiedId === m.id ? 'Copiado' : 'Copiar'}
-                  </button>
-                  {m.task_id == null && (
-                    <button type="button" onClick={() => toTask(m.id, m.content)}>
-                      <ListPlus className="icon" style={{ width: 13, height: 13 }} />
-                      {promotedId === m.id ? 'En Board' : 'Crear tarea'}
-                    </button>
-                  )}
+                    {m.diff && <DiffViewer diffText={m.diff} onSendDrafts={(txt) => setPrompt((cur) => (cur ? `${cur}\n${txt}` : txt))} annotateLabel="Citar en seguimiento" />}
+
+                    {m.role === 'assistant' && (
+                      <div className="turn-act">
+                        {m.task_id != null && !quickReviewed[m.task_id] && (
+                          <>
+                            <button type="button" onClick={() => quickVerdict(m.task_id!, 'ok')}><CheckCircle2 className="icon icon-sm" />Aceptar #{pad(m.task_id)}</button>
+                            <button type="button" onClick={() => quickVerdict(m.task_id!, 'redo')}><ShieldAlert className="icon icon-sm" />Devolver</button>
+                          </>
+                        )}
+                        <button type="button" onClick={() => { navigator.clipboard.writeText(m.content); setCopiedId(m.id); setTimeout(() => setCopiedId(null), 1200) }}>
+                          {copiedId === m.id ? <Check className="icon icon-sm" /> : <Copy className="icon icon-sm" />}
+                          {copiedId === m.id ? 'Copiado' : 'Copiar'}
+                        </button>
+                        {m.task_id == null && (
+                          <button type="button" onClick={() => toTask(m.id, m.content)}>
+                            <ListPlus className="icon icon-sm" />
+                            {promotedId === m.id ? 'En Board' : 'Crear tarea'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </article>
                 </div>
-              )}
-            </article>
-            </React.Fragment>
+              </React.Fragment>
             )
           })}
 
           {activeRun?.failover_used && (busy || activeRun.id === lastAssistantRun) && (
             <div className="engine-divider failover" role="separator" aria-label="Auto-Failover">
-              <Repeat2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />
+              <Repeat2 className="icon icon-sm" aria-hidden="true" />
               <span>Auto-Failover: el motor falló y la respuesta siguió en <b>{activeRun.failover_used}</b></span>
             </div>
           )}
@@ -844,7 +1093,7 @@ export const Console: React.FC<ConsoleProps> = ({
           {activeRun && awaiting.map(({ s, i }) => (
             <div key={i} ref={i === awaiting[0].i ? approvalRef : undefined} className="run-card amber-card" role="alertdialog" aria-modal="false">
               <div className="run-card-head">
-                <ShieldAlert className="icon amber" style={{ width: 16, height: 16 }} aria-hidden="true" />
+                <ShieldAlert className="icon amber" aria-hidden="true" />
                 <b>Aprobación requerida en Act</b>
               </div>
               <dl className="act-summary-dl">
@@ -858,7 +1107,7 @@ export const Console: React.FC<ConsoleProps> = ({
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => decide(i, true, false)}>Aprobar</button>
                 <button type="button" className="btn btn-amber btn-sm" onClick={() => decide(i, true, true)}>Confiar en esta sesión</button>
                 <button type="button" className="btn btn-sm" data-safe onClick={() => decide(i, false, false)}>Rechazar</button>
-                <button type="button" className="btn btn-quiet btn-sm" onClick={stopRun}><Square className="icon" style={{ width: 12, height: 12 }} />Detener</button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={stopRun}><Square className="icon icon-xs" />Detener</button>
               </div>
             </div>
           ))}
@@ -878,8 +1127,9 @@ export const Console: React.FC<ConsoleProps> = ({
               canIsolate={canIsolate}
               blocked={busy}
               busy={orchPlanning}
+              localModels={chatModels}
               onChange={setOrchPlan}
-              onReplan={() => void planGoal(orchPlan.goal, orchPlan.orchestrator)}
+              onReplan={() => void planGoal(orchPlan.goal, orchPlan.orchestrator, orchPlan.orchestrator_model, orchPlan.pool)}
               onLaunch={() => void launchOrchestration()}
               onDiscard={() => setOrchPlan(null)}
             />
@@ -896,7 +1146,7 @@ export const Console: React.FC<ConsoleProps> = ({
                 <span>{activeRun.status === 'finishing' ? 'Guardando respuesta…' : `Ejecutando con ${effectiveTarget.label}…`}</span>
                 {activeRun.steps.length > 0 && <ToolStepsView steps={activeRun.steps} />}
               </div>
-              <button type="button" className="btn btn-xs" onClick={stopRun}><Square className="icon" style={{ width: 12, height: 12 }} />Detener</button>
+              <button type="button" className="btn btn-xs" onClick={stopRun}><Square className="icon icon-xs" />Detener</button>
             </div>
           )}
         </div>
@@ -910,7 +1160,7 @@ export const Console: React.FC<ConsoleProps> = ({
                   <button type="button" className="view-chip" title="Volver al compositor" onClick={() => { setQueue((q) => q.filter((_, k) => k !== qi)); setPrompt(qt) }}>
                     {qt.slice(0, 32)}
                   </button>
-                  {busy && <button type="button" className="btn btn-amber btn-xs" onClick={() => void stopAndSendNow(qi)} title="Detiene el turno actual y envía este mensaje ahora"><Square className="icon" style={{ width: 11, height: 11 }} aria-hidden="true" />Detener y enviar ya</button>}
+                  {busy && <button type="button" className="btn btn-amber btn-xs" onClick={() => void stopAndSendNow(qi)} title="Detiene el turno actual y envía este mensaje ahora"><Square className="icon icon-xs" aria-hidden="true" />Detener y enviar ya</button>}
                 </span>
               ))}
             </div>
@@ -920,7 +1170,7 @@ export const Console: React.FC<ConsoleProps> = ({
             <div className="attach-pop card" role="dialog" aria-label="Adjuntar archivo" ref={attachRef}>
               <div className="attach-pop-head">
                 <input className="field field-sm" value={attachFilter} onChange={(e) => setAttachFilter(e.target.value)} placeholder="Filtrar archivo…" />
-                <button type="button" className="btn btn-quiet btn-xs" onClick={() => setAttachMenu(false)}><X className="icon" style={{ width: 13, height: 13 }} /></button>
+                <button type="button" className="btn btn-quiet btn-xs" onClick={() => setAttachMenu(false)}><X className="icon icon-sm" /></button>
               </div>
               <ul className="attach-pop-list">
                 {filteredAttach.map((f) => (
@@ -930,17 +1180,31 @@ export const Console: React.FC<ConsoleProps> = ({
             </div>
           )}
 
-          {skillCats.length > 0 && !slashOpen && (
-            <div className="skill-chips" role="group" aria-label="Skills por categoría">
-              {skillCats.map(([cat, n]) => (
-                <button key={cat} type="button" className="skill-chip" style={{ ['--cat' as string]: CAT_ACCENT[cat] }} onClick={() => { setSkillCat(cat); setSkillOpen(true) }} title={`${n} skill(s) de ${cat}`}>{cat} <span className="muted">{n}</span></button>
-              ))}
-              {skill !== 'auto' && <button type="button" className="skill-chip on" onClick={() => setSkill('auto')} title="Quitar el skill">{skill} <X className="icon" style={{ width: 11, height: 11 }} aria-hidden="true" /></button>}
-              <span className="mono muted skill-hint">escribe <kbd className="kbd">/</kbd> para elegir uno</span>
+          {skill !== 'auto' && !slashOpen && (
+            <div className="skill-chips" role="group" aria-label="Skill activo">
+              <button type="button" className="skill-chip on" onClick={() => setSkill('auto')} title="Quitar el skill">
+                {skill} <X className="icon icon-xs" aria-hidden="true" />
+              </button>
             </div>
           )}
-          {mode === 'orchestrate' && orchOptions && orchestrator && (
-            <OrchestrateBar options={orchOptions} orchestrator={orchestrator} pool={poolNames} onOrchestrator={setOrchSel} onPool={setOrchPool} scout={orchScout} onScout={setOrchScout} onAdd={(id) => void addOrchAgent(id)} adding={orchAdding} />
+          {mode === 'orchestrate' && orchOptions && (
+            <OrchestrateBar
+              options={orchOptions}
+              orchestrator={orchestrator}
+              orchestratorModel={activeOrchModel}
+              pool={poolNames}
+              agentModels={orchAgentModels}
+              onOrchestrator={setOrchSel}
+              onOrchestratorModel={(m) => setOrchModels((prev) => ({ ...prev, [orchestrator]: m }))}
+              onPool={setOrchPool}
+              onAgentModel={(a, m) => setOrchAgentModels((prev) => ({ ...prev, [a]: m }))}
+              scout={orchScout}
+              onScout={setOrchScout}
+              onAdd={(id) => void addOrchAgent(id)}
+              onAddLocal={(mod) => void addLocalOrchAgent(mod)}
+              adding={orchAdding}
+              localModels={chatModels}
+            />
           )}
           <div className="composer">
             {slashOpen && (
@@ -974,15 +1238,13 @@ export const Console: React.FC<ConsoleProps> = ({
             />
             <div className="composer-bar">
               <button type="button" className="btn btn-quiet btn-xs" onClick={() => { loadWorkspaceMeta(); setAttachMenu((m) => !m) }}>
-                <FilePlus2 className="icon" style={{ width: 13, height: 13 }} />@ Archivo
+                <FilePlus2 className="icon icon-sm" />@ Archivo
               </button>
-              <span className={`chip-inline ${mode === 'act' ? 'amber' : mode === 'orchestrate' ? 'copper' : 'steel'}`}>{mode === 'orchestrate' ? 'ORQUESTAR' : mode.toUpperCase()}</span>
-              <span className="chip-inline">{mode === 'orchestrate' ? `orquesta ${orchestrator || '—'}` : effectiveTarget.label}</span>
               <span className="grow" />
-              <button type="button" className="btn btn-primary btn-sm" disabled={mode === 'orchestrate' ? !prompt.trim() || orchPlanning : !prompt.trim() && !busy} onClick={() => sendText(prompt)}>
-                <ShieldCheck className="icon" style={{ width: 13, height: 13 }} />
+              <button type="button" className="btn btn-primary btn-sm" disabled={mode === 'orchestrate' ? !prompt.trim() || orchPlanning || !orchestrator : !prompt.trim() && !busy} title={mode === 'orchestrate' && !orchestrator ? 'Añade un agente en la barra de Orquestación' : undefined} onClick={() => sendText(prompt)}>
+                <ShieldCheck className="icon icon-sm" />
                 {mode === 'orchestrate' ? 'Planificar' : busy ? 'Encolar' : 'Enviar'}
-                <ArrowRight className="icon" style={{ width: 14, height: 14 }} />
+                <ArrowRight className="icon icon-sm" />
               </button>
             </div>
           </div>

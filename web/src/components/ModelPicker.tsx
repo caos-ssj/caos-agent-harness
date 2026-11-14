@@ -6,8 +6,7 @@ import { useDialog, usePresence } from '../hooks'
 
 interface ModelPickerProps { provider?: ProviderItem; profiles: ModelProfile[]; tiers: RouterTier[]; agents: Agent[]; value: string; onChange: (m: string) => void }
 
-/* Choosing a local model with what is known about it beside the name: its size, whether it was measured, how well,
-   and which agents already run it. A model with no measurement is fine to talk to; the router will never pick it. */
+/* Compact single-line local model picker without overflowing subtitles. */
 export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, profiles, tiers, agents, value, onChange }) => {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -35,31 +34,30 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ provider, profiles, ti
 
   return (
     <div className="mp" ref={box}>
-      <button type="button" className="select mp-btn" aria-expanded={open} aria-haspopup="listbox" onClick={() => setOpen(!open)} title="Choose the local model">
-        <Cpu className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />
+      <button type="button" className="select mp-btn" aria-expanded={open} aria-haspopup="listbox" onClick={() => setOpen(!open)} title="Elegir modelo local">
+        <Cpu className="icon icon-sm" aria-hidden="true" />
         <span className="mp-name">{value}</span>
-        {current?.best ? <span className="chip">{(current.best.precision * 100).toFixed(0)}% measured</span> : current ? <span className="chip dim">not measured</span> : <span className="chip dim">not installed</span>}
-        <ChevronDown className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+        {current?.best ? <span className="pill-mini sage">{(current.best.precision * 100).toFixed(0)}%</span> : <span className="pill-mini">local</span>}
+        <ChevronDown className="icon icon-sm" aria-hidden="true" />
       </button>
       {pres.mounted && (
         <div className="pop mp-pop" ref={popRef} data-leaving={pres.leaving ? '' : undefined} role="dialog" aria-label="Local models">
-          <input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a model" aria-label="Find a model" />
-          <p className="hint" style={{ margin: '8px 2px 6px' }}>{rows.length} installed in Ollama · {rows.filter((r) => r.best).length} measured. Measured models are listed first.</p>
+          <input className="field field-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar modelo local…" aria-label="Find a model" />
           <ul className="mp-list" role="listbox" aria-label="Installed models">
-            {shown.map((r) => (
-              <li key={r.name}>
-                <button type="button" role="option" aria-selected={r.name === value} className="mp-item" onClick={() => { onChange(r.name); setOpen(false) }}>
-                  <span className="mp-check">{r.name === value && <Check className="icon" aria-hidden="true" />}</span>
-                  <span className="mp-text">
+            {shown.map((r) => {
+              const cl = r.best ? clears(r.best, tiers) : []
+              return (
+                <li key={r.name}>
+                  <button type="button" role="option" aria-selected={r.name === value} className={`engine-line ${r.name === value ? 'on' : ''}`} onClick={() => { onChange(r.name); setOpen(false) }}>
+                    <span className="engine-check">{r.name === value && <Check className="icon icon-sm" aria-hidden="true" />}</span>
                     <b>{r.name}</b>
-                    <small>{[r.d?.parameter_size, r.d?.quantization, gb(r.d?.size)].filter(Boolean).join(' · ') || 'installed'}</small>
-                    {r.best ? <small className="ok">{(r.best.precision * 100).toFixed(1)}% precision · lower bound {(r.best.precision_lo * 100).toFixed(1)}%{clears(r.best, tiers).length ? ` · clears ${clears(r.best, tiers).join(', ')}` : ' · clears no tier'}</small> : <small className="dim">not measured: the router will not choose it</small>}
-                    {r.runs.length > 0 && <small>runs agent{r.runs.length > 1 ? 's' : ''} {r.runs.join(', ')}</small>}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {shown.length === 0 && <li className="hint" style={{ padding: 12 }}>No model matches “{q}”.</li>}
+                    <span className="engine-meta">{[r.d?.parameter_size, gb(r.d?.size), cl.join('/')].filter(Boolean).join(' · ') || 'local'}</span>
+                    <span className={`pill-mini ${r.best ? 'sage' : ''}`}>{r.best ? `${(r.best.precision * 100).toFixed(0)}%` : 'sin medir'}</span>
+                  </button>
+                </li>
+              )
+            })}
+            {shown.length === 0 && <li className="hint" style={{ padding: 10 }}>Ningún modelo coincide con «{q}».</li>}
           </ul>
         </div>
       )}

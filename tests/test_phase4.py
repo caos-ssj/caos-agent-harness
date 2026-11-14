@@ -40,7 +40,7 @@ def test_the_terminal_speaks_the_dashboards_copper_palette():
     assert (style.HUESO, style.GRIS, style.TENUE, style.PLATA) == (rgb("#F5F2EC"), rgb("#BBB3A8"), rgb("#9A9287"), rgb("#6E5842"))
     assert style.COBRE == rgb("#E2B076") and style.CHAMPAN == rgb("#EBD3BB")
     css = (ROOT / "web" / "src" / "theme.css").read_text()           # the Web is the source of the palette: the same values
-    for token in ("#EE9A3E", "#7FA6D6", "#6BC78E", "#E87066", "#040405", "226, 176, 118", "#F5F2EC", "#948C81"):
+    for token in ("#EE9A3E", "#7FA6D6", "#6BC78E", "#E87066", "#030303", "226, 176, 118", "#F3EFE8", "#958E83", "#DDA36A"):
         assert token.lower() in css.lower(), token
 
 

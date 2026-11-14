@@ -10,17 +10,42 @@ A task board and policy layer for running AI agents you can check.
 
 **Measured.** 400+ tests · mutation testing catches 26/26 injected faults · the same agent scores 16–17/20 on both engines against 18/20 for plain retrieval, so the baseline is always measured first.
 
-**What you need.** Python 3.11+, Node.js to build the dashboard, and optionally [Ollama](https://ollama.com) for local models. Provider keys are optional and never written to the repository.
+**What you need.** Python 3.11+ (the web dashboard is prebuilt in the repo, so Node.js is only needed to edit `web/` or build the Tauri desktop app) and optionally [Ollama](https://ollama.com) for local models. Provider keys are optional and never written to the repository.
 
 ![The board: queues, tasks and the trace of one task](docs/board.png)
 
 ![Agent vs plain retrieval](docs/agent-results.svg)
 
 ## Quick start
+
+### Linux / macOS
+```bash
+./install.sh                # creates .venv and installs caos-harness (-e .)
+.venv/bin/caos-harness serve
+```
+Or manually:
 ```bash
 pip install -e '.[dev]'     # install
 make check                  # run the tests, validation gates and board demo
 caos-harness serve          # open the dashboard on 127.0.0.1
+```
+
+### Windows (PowerShell)
+```powershell
+git clone https://gitlab.com/braynerssj26/caos-agent-harness.git
+cd caos-agent-harness
+.\install.ps1               # creates .venv and installs caos-harness (-e .)
+.\.venv\Scripts\caos-harness.exe serve
+```
+To use it on **any other project folder**:
+```powershell
+cd C:\path\to\your-project
+C:\path\to\caos-agent-harness\.venv\Scripts\caos-harness.exe init --detect
+C:\path\to\caos-agent-harness\.venv\Scripts\caos-harness.exe serve
+```
+Optional desktop app build (requires Node.js 20+, Rust + MSVC Build Tools, WebView2):
+```powershell
+.\install.ps1 -Desktop
 ```
 
 ## How it fits together

@@ -1,13 +1,15 @@
 Fuentes incluidas en este directorio y su licencia
 ==================================================
 
-Las tres fuentes se distribuyen bajo la SIL Open Font License 1.1 (texto completo
+Las cuatro fuentes se distribuyen bajo la SIL Open Font License 1.1 (texto completo
 más abajo, una copia por familia con su aviso de copyright). Se redistribuyen sin
 cambiar su nombre.
 
   ebgaramond.woff2          EB Garamond
   jetbrainsmono.woff2       JetBrains Mono
   unifrakturmaguntia.woff2  UnifrakturMaguntia (nombre de fuente reservado, ver su aviso)
+  ibmplexsans.woff2         IBM Plex Sans (variable, subconjunto latino; Copyright © 2017 IBM Corp.,
+                            con nombre de fuente reservado «Plex»; obtenida de Fontsource el 2026-11-13)
 
 Los textos son los de https://github.com/google/fonts (ofl/ebgaramond/OFL.txt,
 ofl/jetbrainsmono/OFL.txt, ofl/unifrakturmaguntia/OFL.txt), copiados el 2026-09-30.

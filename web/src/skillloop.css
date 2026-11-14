@@ -1,0 +1,18 @@
+/* Skills that learn from returns: the evidence strip inside a skill's detail. */
+.skill-loop { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--edge-2); border-radius: 10px; background: rgba(255, 255, 255, 0.02); }
+.skill-loop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.skill-loop-head h3 { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+.skill-loop-figure { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.skill-loop-figure b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.skill-meter { position: relative; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.skill-meter i { position: absolute; top: 0; bottom: 0; background: rgba(var(--hl), 0.28); }
+.skill-meter u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--champan); }
+.skill-notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; max-height: 132px; overflow-y: auto; }
+.skill-notes li { display: grid; grid-template-columns: auto 1fr; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.skill-change { display: grid; gap: 2px; font-family: var(--mono); font-size: 12.5px; }
+.skill-change .del { color: #E7A19A; }
+.skill-change .add { color: #A9D6B0; }
+.skill-loop-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.skill-vs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.skill-vs > div { display: grid; gap: 4px; }
+.skill-rate { font-family: var(--mono); font-size: 11px; color: var(--ink-2); margin-left: 6px; }

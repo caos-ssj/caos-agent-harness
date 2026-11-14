@@ -29,7 +29,22 @@ _LOCALHOST_ORIGIN_RE = re.compile(r"^(https?|tauri)://(127\.0\.0\.1|localhost|ta
 def user_bin_dirs(home: Path | None = None) -> list[Path]:
     """Candidate user tool directories that graphical desktop launchers omit from PATH."""
     base = home or Path.home()
-    dirs: list[Path] = [
+    if os.name == "nt":
+        dirs: list[Path] = [
+            base / ".local" / "bin",
+            base / ".cargo" / "bin",
+        ]
+        for env_key, rel in (
+            ("APPDATA", "npm"),
+            ("LOCALAPPDATA", "Programs/Ollama"),
+            ("LOCALAPPDATA", "Microsoft/WinGet/Links"),
+            ("LOCALAPPDATA", "Programs/Microsoft VS Code/bin"),
+        ):
+            raw = os.environ.get(env_key)
+            if raw:
+                dirs.append(Path(raw) / rel)
+        return [d for d in dirs if d.is_dir()]
+    dirs = [
         base / ".local" / "bin",
         base / ".cargo" / "bin",
         base / ".npm-global" / "bin",

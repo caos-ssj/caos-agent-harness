@@ -1,314 +1,312 @@
-/* Theme: premium black, smoked glass over a real ambient light, sharp hairlines, champagne used sparingly.
-   Everything below reads the tokens in the first block. Loaded last, so it wins over the earlier sheets. */
+/* Theme layer: canonical copper-obsidian tokens, @font-face declarations,
+   density / text-scale / ambient-glow preferences, and reduced-motion rules. */
 
-/* One palette: copper obsidian on pure black. The glass is deliberately translucent, so the warm light behind it shows. */
+@font-face { font-family: 'IBM Plex Sans'; src: url('/fonts/ibmplexsans.woff2') format('woff2'); font-weight: 100 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/jetbrainsmono.woff2') format('woff2'); font-weight: 100 800; font-style: normal; font-display: swap; }
+@font-face { font-family: 'UnifrakturMaguntia'; src: url('/fonts/unifrakturmaguntia.woff2') format('woff2'); font-display: swap; }
+
 :root {
-  --ground: #040405;
-  --glass: rgba(14, 11, 10, 0.60);
-  --glass-2: rgba(22, 17, 15, 0.72);
-  --glass-3: rgba(31, 24, 21, 0.78);
+  color-scheme: dark;
+
+  /* ── Core Warm Copper-Obsidian Palette ── */
+  --ground: #030303;
+  --card: #0B0A09;
+  --card-2: #121110;
+  --card-3: #1B1917;
+  --glass: #0B0A09;
+  --glass-2: #121110;
+  --glass-3: #1B1917;
+  --glass-flat: #0B0A09;
   --glass-solid: #0E0B0A;
-  --hl: 226, 176, 118;               /* the highlight: active tabs, focus, selected rows */
-  --edge-rgb: 212, 163, 106;
-  --edge: rgba(212, 163, 106, 0.14);
-  --edge-2: rgba(212, 163, 106, 0.26);
-  --spec: rgba(255, 232, 204, 0.15);  /* the specular line along a card's top edge */
-  --glow-rgb: 201, 151, 92;
-  --glow-a: 0.30;                     /* warm light behind the emblem and the header */
-  --feed-glow: 0.30;                  /* the same light, inside the console's own glass, so it is seen through it */
-  --glow-2-rgb: 235, 157, 68;
+
+  --fill-top: #131210;
+  --fill-bot: #0A0908;
+  --edge-rgb: 226, 176, 118;
+  --edge: rgba(243, 239, 232, 0.09);
+  --edge-2: rgba(243, 239, 232, 0.17);
+  --edge-light: linear-gradient(
+    155deg,
+    rgba(240, 200, 158, 0.56),
+    rgba(226, 176, 118, 0.14) 36%,
+    rgba(226, 176, 118, 0.08) 64%,
+    rgba(233, 185, 138, 0.30)
+  );
+  --spec: rgba(255, 232, 204, 0.12);
+  --inset-top: inset 0 1px 0 rgba(255, 232, 204, 0.07);
+
+  --ink: #F3EFE8;
+  --ink-2: #C9C2B6;
+  --ink-3: #958E83;
+
+  --hl: 221, 163, 106;
+  --copper: #DDA36A;                 /* copper is for acting: the primary button, selection, focus, the edge of light */
+  --fs-num: calc(38px * var(--text-scale));   /* the big instrument figure */
+  --fs-label: calc(12px * var(--text-scale));
+  --champan: #EBD3BB;
+  --gold: #D4A36A;
+  --champan-wash: rgba(226, 176, 118, 0.13);
+  --cta-top: #E6B07A;
+  --cta-bot: #D49A5E;
+  --cta-ink: #160F08;
+
+  /* ── Semantic States (4 states + washes) ── */
+  --warm: #EE9A3E;
+  --warm-soft: #F5B866;
+  --warm-wash: rgba(235, 157, 68, 0.13);
+  --steel: #7FA6D6;
+  --steel-wash: rgba(127, 166, 214, 0.12);
+  --sage: #6BC78E;
+  --sage-wash: rgba(107, 199, 142, 0.12);
+  --coral: #E87066;
+  --danger: #E87066;
+  --coral-wash: rgba(232, 112, 102, 0.12);
+
+  --plan: var(--steel);
+  --act: var(--warm);
+  --pass: var(--sage);
+  --fail: var(--coral);
+  --wait: var(--warm);
+  --live: var(--steel);
+
+  /* ── Agent Family Hues ── */
+  --fam-claude: #B9A0F7;
+  --fam-gemini: #6EA9FF;
+  --fam-codex: #F291C6;
+  --fam-opencode: #5FD6D8;
+  --fam-local: #CFC8B8;
+  --fam-api: #D4A36A;
+
+  /* ── Glow Controls (default: Medium) ── */
+  --glow-rgb: 228, 196, 156;
+  --glow-2-rgb: 214, 160, 100;
+  --glow-a: 0.09;
+  --feed-glow: 0.07;
   --veil-rgb: 212, 163, 106;
-  --veil-a: 0.055;
-  --cta-top: #F0C493; --cta-bot: #C98F52; --cta-ink: #1A0F08;
-}
-:root {
-  --ink: #F5F2EC; --ink-2: #BBB3A8; --ink-3: #948C81;
-  --champan: #EBD3BB; --gold: #D4A36A;
-  --steel: #7FA6D6; --warm: #EE9A3E; --warm-soft: #F5B866; --sage: #6BC78E; --coral: #E87066; --danger: #E87066;
-  --champan-wash: rgba(var(--hl), 0.12);
-  --warm-wash: rgba(235, 157, 68, 0.13); --sage-wash: rgba(107, 199, 142, 0.12); --coral-wash: rgba(232, 112, 102, 0.12); --steel-wash: rgba(127, 166, 214, 0.12);
-  --card: var(--glass); --card-2: var(--glass-2); --card-3: var(--glass-3);
-  --plan: var(--steel); --act: var(--warm); --pass: var(--sage); --fail: var(--coral);
-  --blur: blur(12px) saturate(118%);
-  --glass-flat: rgba(18, 14, 12, 0.62);   /* the same smoked glass for repeated and nested items: no backdrop blur, so it costs nothing per frame */
-  --shadow-pop: 0 14px 38px rgba(0, 0, 0, 0.55);
-  --lift: inset 0 1px 0 var(--spec), inset 0 0 0 1px rgba(255, 224, 188, 0.035), 0 1px 0 rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.28);
+  --veil-a: 0.04;
+  --glow-plan: 0 0 0 1px rgba(127, 166, 214, 0.35), 0 0 22px rgba(127, 166, 214, 0.14);
+  --glow-act: 0 0 0 1px rgba(235, 157, 68, 0.42), 0 0 22px rgba(235, 157, 68, 0.16);
+
+  /* ── Typography (6 sizes, 2 core families + blackletter mark) ── */
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: var(--sans);
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-scale: 1;
+  --fs-xs: calc(12px * var(--text-scale));
+  --fs-sm: calc(13px * var(--text-scale));
+  --fs-md: calc(14px * var(--text-scale));
+  --fs-base: calc(15px * var(--text-scale));
+  --fs-lg: calc(18px * var(--text-scale));
+  --fs-xl: calc(30px * var(--text-scale));
+
+  /* ── Radii (3 strict radii + circular) ── */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* ── Layout & Motion ── */
+  --gap: 16px;
+  --pad: 24px;
+  --row-pad: 9px;
+  --topbar-h: 52px;
+  --sb-w: 260px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.52), 0 22px 48px -8px rgba(0, 0, 0, 0.72);
+  --lift: inset 0 1px 0 var(--spec), 0 18px 40px -22px rgba(0, 0, 0, 0.92);
 }
 
-/* ── The light behind the glass ──────────────────────────────────────────────────────────────────────────── */
-html, body, #root { background: var(--ground); }
+/* ── Live Preference Bindings ── */
+html[data-text='large'],
+.app.text-large {
+  --text-scale: 1.125;
+}
+
+html[data-density='compact'],
+.app.density-compact {
+  --gap: 10px;
+  --pad: 16px;
+  --row-pad: 6px;
+}
+
+html[data-density='comfortable'],
+.app.density-comfortable {
+  --gap: 16px;
+  --pad: 24px;
+  --row-pad: 9px;
+}
+
+html[data-density='wide'],
+.app.density-wide {
+  --gap: 22px;
+  --pad: 32px;
+  --row-pad: 12px;
+}
+
+html[data-glow='subtle'],
+.app.glow-subtle {
+  --glow-a: 0.05;
+  --feed-glow: 0.04;
+  --work-boost: 0.34;
+}
+
+html[data-glow='medium'],
+.app.glow-medium {
+  --glow-a: 0.09;
+  --feed-glow: 0.07;
+  --work-boost: 0.52;
+}
+
+html[data-glow='high'],
+.app.glow-high {
+  --glow-a: 0.16;
+  --feed-glow: 0.12;
+  --work-boost: 0.72;
+}
+
+/* ── Unified Warm Copper-Obsidian Stage Across All 4 Tabs ── */
+html, body, #root {
+  background: var(--ground);
+  font: 400 var(--fs-base)/1.5 var(--sans);
+  font-feature-settings: 'ss01' 0;
+  text-rendering: optimizeLegibility;
+}
+
 .app {
   position: relative;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
-    radial-gradient(860px 540px at 50% 38%, rgba(var(--glow-rgb), var(--glow-a)), transparent 70%),
-    radial-gradient(1100px 280px at 50% -60px, rgba(var(--glow-rgb), calc(var(--glow-a) * 0.9)), transparent 74%),
-    radial-gradient(900px 420px at 50% 96%, rgba(var(--glow-rgb), 0.11), transparent 72%),
-    radial-gradient(520px 340px at 6% 104%, rgba(var(--glow-2-rgb), 0.07), transparent 72%),
-    radial-gradient(460px 300px at 100% 70%, rgba(var(--glow-2-rgb), 0.05), transparent 72%),
+    radial-gradient(640px 260px at 50% -80px, rgba(var(--glow-rgb), calc(var(--glow-a) * 1.45)), rgba(var(--glow-2-rgb), calc(var(--glow-a) * 0.42)) 54%, transparent 80%),
+    radial-gradient(520px 320px at 100% 100%, rgba(var(--glow-2-rgb), calc(var(--glow-a) * 0.28)), transparent 74%),
+    radial-gradient(460px 280px at 0% 96%, rgba(var(--glow-rgb), calc(var(--glow-a) * 0.18)), transparent 74%),
     var(--ground);
 }
-html[data-mode="act"] .app {
+
+html[data-mode='act'] .app {
   background:
-    radial-gradient(720px 440px at 50% 38%, rgba(var(--glow-rgb), var(--glow-a)), transparent 70%),
-    radial-gradient(980px 230px at 50% -50px, rgba(235, 157, 68, 0.10), transparent 74%),
-    radial-gradient(900px 420px at 50% 96%, rgba(var(--glow-rgb), 0.11), transparent 72%),
-    radial-gradient(520px 340px at 6% 104%, rgba(var(--glow-2-rgb), 0.07), transparent 72%),
+    radial-gradient(660px 270px at 50% -80px, rgba(235, 157, 68, calc(var(--glow-a) * 1.15)), rgba(var(--glow-rgb), calc(var(--glow-a) * 0.38)) 56%, transparent 82%),
+    radial-gradient(520px 320px at 100% 100%, rgba(var(--glow-2-rgb), calc(var(--glow-a) * 0.32)), transparent 74%),
     var(--ground);
 }
-/* A very faint engineering grid: it fades out toward the edges and never fights the text. */
-.app::before {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background-image: linear-gradient(rgba(var(--veil-rgb), var(--veil-a)) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--veil-rgb), var(--veil-a)) 1px, transparent 1px);
-  background-size: 56px 56px;
-  -webkit-mask-image: radial-gradient(ellipse 78% 68% at 50% 36%, #000 0, transparent 76%);
-  mask-image: radial-gradient(ellipse 78% 68% at 50% 36%, #000 0, transparent 76%);
-}
+
 .topbar, .shell, .foot { position: relative; z-index: 1; }
-.main { background: none !important; }
+.main { background: transparent; }
 
-/* ── Smoked glass: translucent, a sharp 1px edge, a specular line on top ───────────────────────────────────
-   Backdrop blur is paid only by top-level and floating layers (second block). Repeated or nested items (first block)
-   get the same translucent glass, edge and specular line without it. ─────────────────────────────────────────── */
-.card, .rail, .kpi-card, .prov-card, .intent-box, .host-chip, .tier-mini, .ov-tile, .tool-mcp-row, .export-item, .cmp-col,
-.wt-item, .write-preview, .preflight-card, .global-ws, .composer, .sb-repo, .attach-pop {
-  background: var(--glass-flat);
-  border: 1px solid var(--edge);
-  box-shadow: var(--lift);
-}
-.talk, .board-overview, .skills-list, .skill-detail, .tbl-card, .share-card {
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  border: 1px solid var(--edge);
-  box-shadow: var(--lift);
-}
-/* Measured: a blurred layer with something animating over it is re-blurred on every frame (14 fps in a software-rendered browser with the
-   console blurred and an orchestration running; 60 fps without the blur). What sits behind the console is a smooth glow, so the blur there
-   changes almost nothing: while a run is live the console keeps the same smoked glass, unblurred, and the panel inside it never blurs
-   (it is already inside a backdrop root, so it could only blur the console's own content). */
-.talk.is-live { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(14, 11, 10, 0.70); }
-.orch-root { background: var(--glass); border: 1px solid var(--edge-2); box-shadow: var(--lift); }
-.topbar, .sidebar, .ctx {
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  border-color: var(--edge);
-}
-.foot { background: var(--glass); border-color: var(--edge); }
-.topbar { box-shadow: 0 1px 0 var(--spec) inset, 0 10px 30px rgba(0, 0, 0, 0.35); }
-.foot { box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4); }
-.pop, .preflight-drawer, .engine-pop, .skill-pop, .palette, .skill-modal, .sb-ws-pop {
-  background: var(--glass-2);
-  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  border: 1px solid var(--edge-2);
-  box-shadow: inset 0 1px 0 var(--spec), var(--shadow-pop);
-}
-/* Floating, but not in the blurred set: a more solid glass keeps the text underneath from bleeding through. */
-.draft-tray, .slash-menu {
-  background: rgba(20, 16, 14, 0.94);
-  border: 1px solid var(--edge-2);
-  box-shadow: inset 0 1px 0 var(--spec), var(--shadow-pop);
-}
-.scrim { background: rgba(2, 2, 3, 0.7); }
-.card-2, .skill-item.on, .board-row.is-open { background: var(--glass-2); }
-.field, .select { background-color: rgba(0, 0, 0, 0.38); border: 1px solid var(--edge); }
-.field:focus-visible, .select:focus-visible, .composer:focus-within { border-color: rgba(var(--hl), 0.6); box-shadow: 0 0 0 3px rgba(var(--hl), 0.10); outline: none; }
-.btn { background: rgba(255, 255, 255, 0.035); border: 1px solid var(--edge-2); color: var(--ink); box-shadow: inset 0 1px 0 var(--spec); }
-.btn:hover:not(:disabled) { background: rgba(var(--hl), 0.08); border-color: rgba(var(--hl), 0.42); }
-.btn-quiet { background: transparent; border-color: transparent; box-shadow: none; }
-.btn-quiet:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); border-color: var(--edge); }
-.seg { background: rgba(0, 0, 0, 0.32); border: 1px solid var(--edge); }
-.diff-file, .acc { background: var(--glass-flat); box-shadow: var(--lift); }
-hr, .card-head { border-color: var(--edge); }
-
-/* ── Champagne in small measure: glass that is lit, never a solid slab ───────────────────────────────────── */
-.tabs button[aria-selected="true"], .seg button[aria-pressed="true"], .seg button[aria-selected="true"], .ctx-tabs button[aria-selected="true"], .scope-seg button[aria-pressed="true"], .sb-scope button[aria-pressed="true"], .intent-pill.active {
-  background: rgba(var(--hl), 0.12);
-  color: #F6F2EB;
-  box-shadow: inset 0 0 0 1px rgba(var(--hl), 0.5), 0 0 16px rgba(var(--hl), 0.08);
-}
-.tabs button[aria-selected="true"] .tab-count { background: rgba(0, 0, 0, 0.4); border-color: rgba(235, 157, 68, 0.6); color: var(--warm-soft); }
-.tabs button:hover:not([aria-selected="true"]), .seg button:hover:not([aria-pressed="true"]):not([aria-selected="true"]) { background: rgba(255, 255, 255, 0.05); color: var(--ink); }
-.mode-seg .plan-btn[aria-pressed="true"] { background: var(--steel-wash); color: #BCD3EE; box-shadow: inset 0 0 0 1px rgba(127, 166, 214, 0.5), var(--glow-plan); }
-.mode-seg .act-btn[aria-pressed="true"] { background: var(--warm-wash); color: var(--warm-soft); box-shadow: inset 0 0 0 1px rgba(235, 157, 68, 0.55), var(--glow-act); }
-.tabs { background: rgba(0, 0, 0, 0.34); border-color: var(--edge); }
-.sb-nav-btn.active, .skill-item.on, .palette-item[aria-selected="true"], .engine-row.on, .skill-row.on { background: rgba(var(--hl), 0.10); box-shadow: inset 0 0 0 1px rgba(var(--hl), 0.34); color: #F6F2EB; }
-.board-row.is-open { box-shadow: inset 0 0 0 1px rgba(var(--hl), 0.3); }
-.sb-sess-list li.active { background: rgba(var(--hl), 0.09); border-color: rgba(var(--hl), 0.34); }
-.skip { background: var(--glass-solid); color: var(--ink); border: 1px solid rgba(var(--hl), 0.6); }
-.think-dots i { background: rgba(var(--hl), 0.9); }
-
-/* The single filled button of a view: silk-metal champagne. Every other "primary" is lit glass. */
-.btn-primary { background: rgba(var(--hl), 0.10); border-color: rgba(var(--hl), 0.55); color: #F6F2EB; box-shadow: inset 0 1px 0 var(--spec); }
-.btn-primary:hover:not(:disabled) { background: rgba(var(--hl), 0.18); border-color: rgba(var(--hl), 0.8); }
-.talk-compose .btn-primary, .board-bar .btn-primary, .cmp-pick .btn-primary, .share-card > .btn-primary, .skill-actions .btn-primary {
-  background: linear-gradient(180deg, var(--cta-top), var(--cta-bot)); border-color: rgba(255, 255, 255, 0.28); color: var(--cta-ink);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 4px 16px rgba(var(--hl), 0.16);
-}
-.talk-compose .btn-primary:hover:not(:disabled), .board-bar .btn-primary:hover:not(:disabled), .cmp-pick .btn-primary:hover:not(:disabled), .share-card > .btn-primary:hover:not(:disabled), .skill-actions .btn-primary:hover:not(:disabled) { filter: brightness(1.06); background: linear-gradient(180deg, var(--cta-top), var(--cta-bot)); }
-.btn-primary:disabled { opacity: .5; }
-.btn-amber { background: var(--warm-wash); border-color: rgba(235, 157, 68, 0.55); color: var(--warm-soft); }
-.btn-sage { background: var(--sage-wash); border-color: rgba(107, 199, 142, 0.45); color: var(--sage); }
-
-/* ── Warm, harmonious markers ────────────────────────────────────────────────────────────────────────────── */
-.dot.sage { box-shadow: 0 0 0 2px var(--sage-wash), 0 0 8px rgba(107, 199, 142, .5); }
-.dot.amber { box-shadow: 0 0 0 2px var(--warm-wash), 0 0 8px rgba(235, 157, 68, .5); }
-.dot.coral { box-shadow: 0 0 0 2px var(--coral-wash), 0 0 8px rgba(232, 112, 102, .45); }
-.pill-mini, .chip, .chip-inline { background: rgba(255, 255, 255, 0.04); border-color: var(--edge-2); color: var(--ink-2); }
-.pill-mini.sage, .sage-chip { background: var(--sage-wash); border-color: rgba(107, 199, 142, 0.4); color: var(--sage); }
-.pill-mini.amber, .amber-chip, .chip-amber { background: var(--warm-wash); border-color: rgba(235, 157, 68, 0.45); color: var(--warm-soft); }
-.pill-mini.coral, .coral-chip { background: var(--coral-wash); border-color: rgba(232, 112, 102, 0.45); color: var(--coral); }
-.pill-mini.steel, .steel-chip, .chip-steel { background: var(--steel-wash); border-color: rgba(127, 166, 214, 0.4); color: #A9C4E6; }
-.icon.pass { color: var(--pass); } .icon.act { color: var(--act); } .icon.fail { color: var(--fail); } .icon.steel { color: #A9C4E6; }
-.kpi-val.pass { color: var(--pass); } .kpi-val.act { color: var(--act); } .kpi-val.fail { color: var(--fail); }
-.sage { color: var(--sage); } .amber { color: var(--warm); } .coral { color: var(--coral); } .steel { color: #A9C4E6; } .champagne { color: var(--champan); }
-.verdict-badge.pass { color: var(--pass); } .verdict-badge.act { color: var(--act); } .verdict-badge.fail { color: var(--fail); }
-.diff-line.add, .split-cell.add { background: rgba(107, 199, 142, 0.10); } .diff-line.del, .split-cell.del { background: rgba(232, 112, 102, 0.10); }
-a { color: var(--champan); }
-
-/* ── The emblem, crisper: bright rings, depth under glass ────────────────────────────────────────────────── */
-.core-ring { stroke: rgba(var(--hl), 0.30); }
-.core-ring.inner { stroke: rgba(var(--hl), 0.18); }
-.core-ring.outer { stroke: rgba(var(--hl), 0.22); }
-.core-scale { stroke: rgba(var(--hl), 0.22); } .core-scale.major { stroke: rgba(var(--hl), 0.6); }
-.core-node-bg { fill: rgba(10, 9, 11, 0.82); stroke-width: 1.8; }
-.core-center-bg { fill: rgba(8, 8, 10, 0.7); stroke: rgba(var(--hl), 0.32); }
-/* The soft light around the emblem is a static gradient behind the drawing, not a drop-shadow filter on the whole SVG:
-   nothing here is re-rasterised while the running state animates. */
-.core { position: relative; isolation: isolate; }
-.core::before { content: ''; position: absolute; inset: 4% 8%; z-index: -1; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, rgba(var(--glow-rgb), 0.09), transparent); }
-
-/* ── Metrics below 1120 px: the trend sits above the tier matrix, each with its full width ───────────────── */
-@media (max-width: 1120px) {
-  .metrics-split { grid-template-columns: minmax(0, 1fr); }
+/* ── Ambient Family Working Halo (Run view) ── */
+.view.room::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 440px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.8s var(--ease);
+  background: radial-gradient(960px 360px at 60% -130px, color-mix(in srgb, var(--work, transparent) 42%, transparent), transparent 72%);
 }
 
-/* Light inside the console: the emblem sits in a warm pool, visible through the glass around it. */
-.feed { background: radial-gradient(440px 320px at 50% 44%, rgba(var(--glow-rgb), var(--feed-glow)), transparent 72%); }
-.skip { top: -56px; }
-.skip:focus { top: 8px; }
-
-/* State buttons keep their hue through the glass base and through hover. */
-.btn-quiet { color: var(--ink-2); }
-.btn-quiet:hover:not(:disabled) { color: var(--ink); }
-.btn-danger, .btn-coral-ghost { color: var(--coral); border-color: rgba(232, 112, 102, 0.5); background: var(--coral-wash); }
-.btn-danger:hover:not(:disabled), .btn-coral-ghost:hover:not(:disabled) { background: rgba(232, 112, 102, 0.2); border-color: var(--coral); }
-.btn-amber:hover:not(:disabled) { background: rgba(235, 157, 68, 0.22); border-color: var(--warm); }
-.btn-sage:hover:not(:disabled) { background: rgba(107, 199, 142, 0.22); border-color: var(--sage); }
-.qa-chip.selected { background: var(--steel-wash); border-color: rgba(127, 166, 214, 0.55); color: #BCD3EE; }
-/* Wells (inset dark areas) are smoked glass too, not opaque slabs. */
-.sb-scope, .ctx-tabs, .probe-strip, .delivered, .pipeline-drawer, .act-cmd-pre, .wt-banner, .tool-summary, .tool-list, .md .md-code, .onboard li, .tabs, .seg { background: rgba(0, 0, 0, 0.34); }
-
-/* The light is seen in the header too, and through the console glass. */
-.topbar { background: radial-gradient(640px 70px at 50% 0, rgba(var(--glow-rgb), calc(var(--glow-a) * 0.7)), transparent 80%), var(--glass); }
-.feed { background: radial-gradient(520px 380px at 50% 44%, rgba(var(--glow-rgb), var(--feed-glow)), transparent 72%); }
-
-/* Legibility of small and muted text (checked against the rendered glass). */
-.chip.dim, .skill-item.on small, .skill-item small { color: var(--ink-2); }
-.sb-sess-text small, .sb-sess-main small, .safety.slim .mono.muted, .muted, .mono.muted, .mute { color: #9A9287; }
-.field::placeholder, .composer-field::placeholder { color: #968E83; opacity: 1; }
-.trend-axis { fill: #A39B90; } .trend-axis.ms { fill: var(--gold); }
-.trend-line.steel { stroke: var(--gold); } .sw.steel { background: var(--gold); }
-.btn:disabled { opacity: .62; }
-.btn-primary:disabled, .talk-compose .btn-primary:disabled, .board-bar .btn-primary:disabled, .cmp-pick .btn-primary:disabled, .share-card > .btn-primary:disabled, .skill-actions .btn-primary:disabled {
-  opacity: 1; background: rgba(255, 255, 255, 0.05); border-color: var(--edge-2); color: #A39B90; box-shadow: none; filter: none;
-}
-/* Warm neutrals for ordinary states; cobalt is kept for Plan only. */
-.pill-mini.steel { background: rgba(var(--hl), 0.07); border-color: var(--edge-2); color: var(--ink-2); }
-.ov-tile.steel b { color: var(--champan); }
-.safety.slim { background: rgba(127, 166, 214, 0.07); }
-.safety.slim.armed { background: rgba(235, 157, 68, 0.08); }
-.board-bar .btn-amber { background: transparent; }
-.mx-head { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.25; }
-@media (max-width: 1120px) {
-  .kpi-grid-5 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .kpi-grid-5 .kpi-card:nth-child(-n+3) { grid-column: span 2; }
-  .kpi-grid-5 .kpi-card:nth-child(n+4) { grid-column: span 3; }
+.view.room[data-working]:not([data-working=''])::before {
+  opacity: calc(var(--work-boost, 0.34) * 2);
 }
 
-/* Fixes from the final contrast audit: small labels over the bright halo, a clip that reads as a scroll, a clearer axis. */
-.core-node .core-sub, .core-center .core-sub { fill: var(--ink-2); }
-.hero-caption { color: var(--ink-2); }
-.skill-chips { -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent); mask-image: linear-gradient(90deg, #000 94%, transparent); }
-.trend-axis { font-size: 12.5px; }
+.view.room[data-working]:not([data-working=''])::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 10%, var(--work, var(--champan)) 50%, transparent 90%);
+  opacity: 0.72;
+  background-size: 55% 100%;
+  background-repeat: no-repeat;
+  animation: live-scan 2.2s linear infinite;
+}
 
-/* ── Rendering cost ──────────────────────────────────────────────────────────────────────────────────────────
-   Repeated rows and cards are isolated, so a change inside one never re-lays-out the page. Long lists with a stable row height also skip
-   rendering what is off screen. Content-visibility clips what a row paints outside itself, so rings inside those rows are drawn inward. */
-.board-row, .prov-card, .ov-tile, .orch-card { contain: layout style; }
-.board-row { content-visibility: auto; contain-intrinsic-size: auto 41px; }
-.board-row :focus-visible, .sb-sess-list li :focus-visible { outline-offset: -2px; }
-.sb-sess-list li { content-visibility: auto; contain-intrinsic-size: auto 46px; }
-.skill-item { content-visibility: auto; contain-intrinsic-size: auto 60px; }
-.prov-card { content-visibility: auto; contain-intrinsic-size: auto 200px; }
-.prov-add { contain-intrinsic-size: auto 120px; }
+.view.room[data-working='claude'] { --work: var(--fam-claude); }
+.view.room[data-working='agy'] { --work: var(--fam-gemini); }
+.view.room[data-working='gemini'] { --work: var(--fam-gemini); }
+.view.room[data-working='codex'] { --work: var(--fam-codex); }
+.view.room[data-working='opencode'] { --work: var(--fam-opencode); }
+.view.room[data-working='local'] { --work: var(--fam-local); }
+.view.room[data-working='api'] { --work: var(--fam-api); }
 
-/* ── Motion: transform and opacity only (compositor), and only where it says something ────────────────────── */
-/* Popovers, the palette and modals open with a short rise and leave with the reverse. `data-leaving` is set by usePresence while the exit plays. */
-.pop, .preflight-drawer { transform-origin: top right; }
-.engine-pop, .skill-pop, .mp-pop, .sb-ws-pop { transform-origin: top left; }
-.slash-menu { transform-origin: bottom left; }
-.palette, .skill-modal { transform-origin: top center; }
-.engine-pop, .skill-pop, .mp-pop, .sb-ws-pop, .slash-menu, .palette, .skill-modal { animation: pop 160ms var(--ease) backwards; }
-.ctx { animation: ctx-in 190ms var(--ease) backwards; }
-[data-leaving] { pointer-events: none; }
-.pop[data-leaving], .preflight-drawer[data-leaving] { animation: pop-out 150ms var(--ease) forwards; }
-.scrim[data-leaving] { animation: fade-out 140ms var(--ease) forwards; }
-.ctx[data-leaving] { animation: ctx-out 190ms var(--ease) forwards; }
-@keyframes pop-out { to { opacity: 0; transform: translateY(-4px) scale(.98); } }
-@keyframes fade-out { to { opacity: 0; } }
-@keyframes ctx-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
-@keyframes ctx-out { to { opacity: 0; transform: translateX(14px); } }
+.feed {
+  background: radial-gradient(500px 360px at 50% 44%, rgba(var(--glow-rgb), var(--feed-glow)), transparent 72%);
+}
 
-/* Staggered entrance for cards and streaming steps: put `.stagger-in` on each and `style={{ '--i': n }}`; up to eight steps, 40 ms apart. */
-.stagger-in { animation: stagger-in 190ms ease-out backwards; animation-delay: calc(min(var(--i, 0), 7) * 40ms); }
-@keyframes stagger-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* ── Reduced Motion ("Enfoque" or OS preference, zero !important) ── */
+.app.motion-focus *,
+.app.motion-focus *::before,
+.app.motion-focus *::after {
+  animation-duration: 0.001ms;
+  animation-iteration-count: 1;
+  transition-duration: 0ms;
+}
 
-/* A live dot: the ring is a pseudo-element that only scales and fades, so it never touches layout or paint. At rest the ring is invisible. */
-.live-pulse { position: relative; display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pulse, var(--warm)); }
-.live-pulse::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid var(--pulse, var(--warm)); opacity: 0; transform: scale(1); pointer-events: none; }
-.app:not(.motion-focus) .live-pulse::after { animation: live-pulse 1.7s ease-out infinite; will-change: transform, opacity; }
-@keyframes live-pulse { 0% { opacity: .75; transform: scale(1); } 100% { opacity: 0; transform: scale(2.7); } }
+.app.motion-focus .view.room[data-working]:not([data-working=''])::after,
+.app.motion-focus .btn.is-live,
+.app.motion-focus .run-dot,
+.app.motion-focus .live-pulse::after,
+.app.motion-focus .think-dots i,
+.app.motion-focus .desktop-boot-bar span,
+.app.motion-focus .core-sweep,
+.app.motion-focus .core-edge.flowing {
+  animation: none;
+}
 
-/* "Enfoque" (.app.motion-focus) and the system's reduced-motion setting still every decorative motion above. The generic rule in phase2.css
-   already shortens durations under Enfoque; these state it outright, because a delayed `backwards` fill would otherwise hold an item hidden. */
-.app.motion-focus .stagger-in, .app.motion-focus .live-pulse::after, .app.motion-focus .view, .app.motion-focus .ctx, .app.motion-focus .pop, .app.motion-focus .scrim,
-.app.motion-focus .preflight-drawer, .app.motion-focus .engine-pop, .app.motion-focus .skill-pop, .app.motion-focus .mp-pop, .app.motion-focus .sb-ws-pop,
-.app.motion-focus .slash-menu, .app.motion-focus .palette, .app.motion-focus .skill-modal, .app.motion-focus .core-sweep, .app.motion-focus .core-edge.flowing { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .stagger-in, .live-pulse::after, .view, .ctx, .pop, .scrim, .preflight-drawer, .engine-pop, .skill-pop, .mp-pop, .sb-ws-pop,
-  .slash-menu, .palette, .skill-modal, .core-sweep, .core-edge.flowing { animation: none !important; will-change: auto !important; }
-  .btn, .card, .prov-card, .skill-item, .starter-chip, .board-row, .tier-mini, .ov-tile, .tabs button, .core-halo, .core-node-bg, .acc-chev { transition-duration: 0.01ms !important; }
-}
+  .view,
+  .ctx,
+  .pop,
+  .scrim,
+  .preflight-drawer,
+  .engine-pop,
+  .skill-pop,
+  .mp-pop,
+  .sb-ws-pop,
+  .slash-menu,
+  .palette,
+  .skill-modal,
+  .stagger-in,
+  .live-pulse::after,
+  .turn.fresh,
+  .board-row.fresh,
+  .cycle.fresh,
+  .skel,
+  .think-dots i,
+  .desktop-boot-bar span,
+  .btn.is-live,
+  .run-dot,
+  .rnote,
+  .flash-line,
+  .flash-check path,
+  .flash-check circle,
+  .quote-plus,
+  .board-row.just-moved,
+  .kanban-card.just-moved,
+  .core-sweep,
+  .core-edge.flowing,
+  .view.room[data-working]:not([data-working=''])::after {
+    animation: none;
+  }
 
-/* ── Desktop shell & native OS integration ───────────────────────────────────────────────────────────────── */
-.desktop-boot { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.desktop-boot-card {
-  width: min(440px, 100%);
-  padding: 28px 26px;
-  border-radius: 16px;
-  background: var(--glass-2);
-  border: 1px solid var(--edge-2);
-  box-shadow: var(--lift), var(--shadow-pop);
-  backdrop-filter: var(--blur);
-  display: grid;
-  gap: 12px;
-  text-align: center;
-  justify-items: center;
+  .btn,
+  .card,
+  .prov-card,
+  .skill-item,
+  .starter-chip,
+  .board-row,
+  .tier-mini,
+  .ov-tile,
+  .tabs [role='tab'],
+  .tabs [role='tab']::after,
+  .core-halo,
+  .core-node-bg,
+  .acc-chev {
+    transition-duration: 0ms;
+  }
 }
-.desktop-boot-mark {
-  font-family: var(--mono);
-  font-size: 13.5px;
-  letter-spacing: .24em;
-  color: var(--champan);
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--edge-2);
-  background: rgba(var(--hl), .08);
-}
-.desktop-boot-card h1 { margin: 0; font-size: 18px; color: var(--ink); }
-.desktop-boot-card p { margin: 0; font-size: 14px; line-height: 1.5; }
-.desktop-boot-bar { position: relative; width: 100%; height: 3px; border-radius: 999px; overflow: hidden; background: rgba(var(--edge-rgb), .14); margin-top: 4px; }
-.desktop-boot-bar span { position: absolute; inset: 0 auto 0 0; width: 42%; background: linear-gradient(90deg, transparent, var(--gold), var(--champan), transparent); animation: boot-slide 1.15s ease-in-out infinite; }
-@keyframes boot-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
-.sb-ws-actions { display: grid; gap: 6px; }
-.sb-repo-bar { display: flex; gap: 6px; padding-top: 6px; margin-top: 4px; border-top: 1px solid rgba(var(--edge-rgb), .1); }
-.sb-repo-bar .btn { flex: 1; justify-content: center; }

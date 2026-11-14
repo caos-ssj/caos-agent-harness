@@ -112,8 +112,10 @@ PRESETS: dict[str, dict] = {
 API = {k: {**v} for k, v in PRESETS.items()}
 
 CLIS = {
-    "claude": {"label": "Claude Code", "account": "your Claude subscription", "bin": "claude", "command": ["claude", "-p"], "timeout": 600},
-    "codex": {"label": "OpenAI Codex", "account": "your ChatGPT subscription", "bin": "codex", "command": ["codex", "exec", "-"], "timeout": 600},
+    "claude": {"label": "Claude Code", "account": "your Claude subscription", "bin": "claude", "command": ["claude", "-p"], "timeout": 600,
+               "models": ["sonnet", "opus", "haiku"]},
+    "codex": {"label": "OpenAI Codex", "account": "your ChatGPT subscription", "bin": "codex", "command": ["codex", "exec", "-"], "timeout": 600,
+              "models": ["gpt-5.3-codex", "o4-mini", "gpt-4.1"]},
     "opencode": {"label": "OpenCode CLI", "account": "your OpenCode CLI / free Zen models", "bin": "opencode", "command": ["opencode", "run", "-m", "opencode/glm-5.3-flash-free"], "timeout": 600,
                  "free_models": ["opencode/glm-5.3-flash-free", "opencode/deepseek-v4.1-flash-free", "opencode/minimax-m3.1-flash-free", "opencode/beam-free"]},
     # `agy` takes the prompt as the value of `-p`, not on stdin: "{prompt}" is replaced by the task, one argv element, never through a shell.
@@ -539,6 +541,7 @@ def detect_clis(added: set[str] | None = None) -> list[dict]:
             "free_models": list(c.get("free_models") or []),
             "models": list(c.get("models") or c.get("free_models") or []),
             "orchestrator_capable": cid in ORCHESTRATOR_CLIS,
+            "effort": dict(zip(("supported", "reason"), effort_support(c["command"]))),
         })
     return out
 
@@ -561,6 +564,69 @@ def cli_command(cid: str, model: str | None = None) -> list[str]:
         return ["claude", flag, model, "-p"]
     i = base.index("-p")        # agy: the flag goes before -p, whose value is the prompt
     return base[:i] + [flag, model] + base[i:]
+
+
+def model_of(command=(), provider: str | None = None, model: str | None = None, system: str | None = None) -> str | None:
+    """The effective model of an agent: explicit `model` or `system`, or extracted from `--model`/`-m`/`ollama run <model>` in `command`."""
+    if model:
+        return model
+    if system:
+        return system
+    cmd = list(command or ())
+    for i, part in enumerate(cmd):
+        if part in ("--model", "-m") and i + 1 < len(cmd) and not cmd[i + 1].startswith("-"):
+            return cmd[i + 1]
+        if part.startswith("--model=") or part.startswith("-m="):
+            val = part.split("=", 1)[1].strip()
+            if val:
+                return val
+    if len(cmd) >= 3 and Path(cmd[0]).name == "ollama" and cmd[1] == "run":
+        return cmd[2]
+    return None
+
+
+# Effort: how hard the agent is asked to think. Only what the installed tool documents is translated; anywhere else the setting is
+# refused with the reason, never silently dropped. Checked against `claude --help` (--effort <level>) and `codex exec --help`
+# (-c key=value, with the config key `model_reasoning_effort`). `opencode run` takes it only as a per-model variant
+# (`provider/model#variant`) and `agy` as part of the model name, so neither gets a generic flag from here.
+EFFORTS = ("low", "medium", "high")
+EFFORT_UNSUPPORTED = {
+    "opencode": "OpenCode takes effort as a model variant (provider/model#variant) that depends on the model: choose it in the model name",
+    "agy": "Antigravity fixes the effort in the model name (…-high, …-medium): choose it there",
+    "ollama": "Ollama models have no effort setting",
+}
+
+
+def effort_support(command, provider: str | None = None) -> tuple[bool, str]:
+    """Whether an agent's command takes an effort level, and how (or why not), in words for the operator."""
+    if provider:
+        return False, "API agents send no effort setting from here yet"
+    cmd = list(command or ())
+    if not cmd:
+        return False, "no command"
+    b = Path(cmd[0]).name
+    if b == "claude":
+        if any(x == "--effort" or x.startswith("--effort=") for x in cmd):
+            return False, "this command already sets --effort itself"
+        return True, "sent as claude --effort <level>"
+    if b == "codex":
+        if "exec" not in cmd:
+            return False, "only `codex exec` takes the setting"
+        if any("model_reasoning_effort" in x for x in cmd):
+            return False, "this command already sets model_reasoning_effort itself"
+        return True, "sent as codex exec -c model_reasoning_effort=<level>"
+    return False, EFFORT_UNSUPPORTED.get(b, f"{b} has no documented effort setting")
+
+
+def with_effort(command, effort: str | None) -> list[str]:
+    """The command with the effort level added where the tool takes one; unchanged with no effort or a tool that takes none."""
+    cmd = list(command)
+    if not effort or effort not in EFFORTS or not effort_support(cmd)[0]:
+        return cmd
+    if Path(cmd[0]).name == "claude":
+        return [cmd[0], "--effort", effort] + cmd[1:]
+    i = cmd.index("exec")       # codex: an option of `exec`, before the dash that stands for stdin
+    return cmd[:i + 1] + ["-c", f"model_reasoning_effort={effort}"] + cmd[i + 1:]
 
 
 # ── Persistent Global + Legacy Custom Providers, Ollama Hosts, Intents & Failover ──────

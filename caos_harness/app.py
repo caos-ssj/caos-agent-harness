@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .board.core import Board, DispatchTimeout, SafeDispatchError
@@ -61,6 +62,7 @@ class Agent:
     model: str | None = None
     key_env: str | None = None    # the NAME of the environment variable that holds the key, never the key
     cost: str | None = None       # "free" | "cheap" | "paid": what a call costs; unset, the harness infers it (see scout.cost_tier)
+    effort: str | None = None     # "low" | "medium" | "high": only for a command whose tool takes it (see providers.effort_support)
 
 
 @dataclass
@@ -110,6 +112,14 @@ def load(path: Path | None = None) -> Project:
         if name == PERSON:
             raise ConfigError(f"'{PERSON}' is the queue of the human reviewer; name the agent something else")
         provider = a.get("provider")
+        effort = a.get("effort") or None
+        if effort is not None:
+            from .providers import EFFORTS, effort_support
+            if effort not in EFFORTS:
+                raise ConfigError(f"agents.{name}.effort must be one of {', '.join(EFFORTS)}")
+            can, why = effort_support(cmd if isinstance(cmd, list) else (), provider)
+            if not can:
+                raise ConfigError(f"agents.{name}.effort cannot be set: {why}")
         if provider is not None:
             from .providers import API, MODEL
             if provider not in API:
@@ -125,18 +135,110 @@ def load(path: Path | None = None) -> Project:
             continue
         if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):
             raise ConfigError(f"agents.{name}.command must be a non-empty list of strings")
-        agents[name] = Agent(name, tuple(cmd), float(a.get("timeout", 300)), a.get("system"), cost=a.get("cost"))
+        agents[name] = Agent(name, tuple(cmd), float(a.get("timeout", 300)), a.get("system"), cost=a.get("cost"), effort=effort)
     b = raw.get("board") or {}
     return Project(root, root / b.get("db", ".harness/board.db"), root / b.get("trace", ".harness/trace.db"), agents)
 
 
-def init(folder: Path) -> Path:
+def init(folder: Path, smart: bool = False) -> Path:
     path = folder / CONFIG
     if path.exists():
         raise ConfigError(f"{path} already exists")
+    if smart:
+        from . import detect
+        detect.apply_init(folder)
+        return path
     path.write_text(EXAMPLE, encoding="utf-8")
     (folder / ".harness").mkdir(exist_ok=True)
     return path
+
+
+def resolve_argv(cmd: list[str] | tuple[str, ...]) -> list[str]:
+    """Resolve `.venv/bin/*` and PATH `.cmd`/`.bat` shims so subprocess argv lists run identically on Windows and POSIX."""
+    out = [str(c) for c in cmd]
+    if os.name != "nt" or not out:
+        return out
+    head = out[0]
+    norm = head.replace("\\", "/")
+    parts = norm.split("/")
+    if len(parts) >= 3 and parts[-2] == "bin" and parts[-3] in (".venv", "venv") and not os.path.isfile(head):
+        stem = parts[-1][:-4] if parts[-1].lower().endswith(".exe") else parts[-1]
+        win_exe = os.path.join(os.path.dirname(os.path.dirname(head)), "Scripts", f"{stem}.exe")
+        if os.path.isfile(win_exe):
+            out[0] = win_exe
+            return out
+    if not os.path.isfile(head):
+        found = shutil.which(head)
+        if found:
+            out[0] = found
+    return out
+
+
+def popen_group_kwargs(extra: dict | None = None) -> dict:
+    """Subprocess kwargs isolating a child in its own group/session across POSIX and Windows."""
+    kw = dict(extra or {})
+    if os.name == "nt":
+        kw.setdefault("creationflags", getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+    else:
+        kw.setdefault("start_new_session", True)
+    return kw
+
+
+def terminate_process_tree(proc: subprocess.Popen, grace: float = 2.0, wait: bool = True) -> None:
+    """Stop a subprocess and any descendants it spawned across POSIX process groups and Windows job trees."""
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+        except Exception:
+            pass
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        if wait:
+            try:
+                proc.wait(timeout=max(0.5, grace))
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                proc.wait(timeout=2)
+        return
+
+    sigterm = getattr(signal, "SIGTERM", 15)
+    sigkill = getattr(signal, "SIGKILL", sigterm)
+    try:
+        os.killpg(os.getpgid(proc.pid), sigterm)
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    if not wait:
+        return
+    try:
+        proc.wait(timeout=grace)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(os.getpgid(proc.pid), sigkill)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
 
 
 class ProcessGroup:
@@ -147,18 +249,18 @@ class ProcessGroup:
         self._cancelled = False
 
     def __call__(self, cmd, input="", capture_output=True, text=True, timeout=None, cwd=None, **kwargs):
+        resolved = resolve_argv(cmd)
         with self._lock:
             if self._cancelled:
                 raise RuntimeError("Process group is cancelled")
             p = subprocess.Popen(
-                cmd,
+                resolved,
                 stdin=subprocess.PIPE if input is not None else None,
                 stdout=subprocess.PIPE if capture_output else None,
                 stderr=subprocess.PIPE if capture_output else None,
                 text=text,
                 cwd=cwd,
-                start_new_session=True,
-                **kwargs,
+                **popen_group_kwargs(kwargs),
             )
             self._procs.add(p)
         try:
@@ -175,13 +277,7 @@ class ProcessGroup:
                 self._procs.discard(p)
 
     def _terminate_proc(self, p: subprocess.Popen) -> None:
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-        except Exception:
-            try:
-                p.terminate()
-            except Exception:
-                pass
+        terminate_process_tree(p, wait=False)
 
     def cancel(self) -> None:
         with self._lock:
@@ -189,6 +285,26 @@ class ProcessGroup:
             procs = list(self._procs)
         for p in procs:
             self._terminate_proc(p)
+
+
+_ANSI_WRAP = re.compile(r"\x1b\[(\d*)D\x1b\[K\r?\n?")
+_ANSI_ESC = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\r")
+
+
+def clean_terminal_output(text: str) -> str:
+    """Replay terminal cursor-back word-wraps and strip ANSI control sequences from CLI stdout."""
+    if "\x1b" not in text and "\r" not in text:
+        return text
+    buf: list[str] = []
+    pos = 0
+    for m in _ANSI_WRAP.finditer(text):
+        buf.append(text[pos:m.start()])
+        back = int(m.group(1) or "1")
+        chunk = "".join(buf)
+        buf = [chunk[:-back] if back < len(chunk) else ""]
+        pos = m.end()
+    buf.append(text[pos:])
+    return _ANSI_ESC.sub("", "".join(buf))
 
 
 class CommandDispatcher:
@@ -209,7 +325,10 @@ class CommandDispatcher:
             with self.project._mu:
                 self.project._busy.add(agent)
             try:
-                self._send(agent, text)
+                from . import ledger
+                with ledger.timed(self.project, agent, text) as call:   # seconds and characters of every call, failed or not
+                    self._send(agent, text)
+                    call.out = self.outputs.get(agent, "")
             finally:
                 with self.project._mu:
                     self.project._busy.discard(agent)
@@ -252,24 +371,35 @@ class CommandDispatcher:
                     except Exception:
                         pass
                 raise SafeDispatchError(str(e)) from None
-        cmd, stdin = list(a.command), text
+        from .providers import with_effort
+        cmd, stdin = with_effort(a.command, a.effort), text
         if PROMPT_SLOT in cmd:   # a CLI that takes the prompt as an argument: it is one argv element, never parsed by a shell
             if len(text.encode("utf-8")) > MAX_ARG_BYTES:
                 raise SafeDispatchError(f"the task is too long to pass as an argument to {agent}")
             cmd, stdin = [text if part == PROMPT_SLOT else part for part in cmd], ""
+        run_kw: dict = {"input": stdin, "capture_output": True, "text": True, "timeout": a.timeout, "cwd": self.cwd or self.project.root}
+        if self.runner is subprocess.run:
+            run_kw["env"] = {**os.environ, "TERM": "dumb", "NO_COLOR": "1", "COLUMNS": "9999"}
+            cmd = resolve_argv(cmd)
         try:
-            r = self.runner(cmd, input=stdin, capture_output=True, text=True, timeout=a.timeout, cwd=self.cwd or self.project.root)
+            r = self.runner(cmd, **run_kw)
         except subprocess.TimeoutExpired as e:
             raise DispatchTimeout(f"{agent} did not finish in {a.timeout:g}s") from e
         if r.returncode != 0:
             raise RuntimeError(f"{agent} exited with {r.returncode}: {(r.stderr or '').strip()[:200]}")
-        self.outputs[agent] = r.stdout.strip()
+        self.outputs[agent] = clean_terminal_output(r.stdout).strip()
 
 
-def add_task(p: Project, text: str, queue: str | None = None, skill: str | None = None, tier: str | None = None) -> tuple[int, str, str]:
-    """Returns (task id, queue, why). With `tier`, the router decides: the agent that runs the chosen system, or a person."""
+def add_task(p: Project, text: str, queue: str | None = None, skill: str | None = None, tier: str | None = None,
+             effort: str | None = None) -> tuple[int, str, str]:
+    """Returns (task id, queue, why). With `tier`, the router decides: the agent that runs the chosen system, or a person.
+    `effort` is refused when the agent that gets the task has no way to take it: it is never stored as a setting that does nothing."""
     if skill and not known(skill):
         raise ConfigError(f"unknown skill: {skill}")
+    if effort:
+        from .providers import EFFORTS
+        if effort not in EFFORTS:
+            raise ConfigError(f"effort must be one of {', '.join(EFFORTS)}")
     why = "queue given"
     decision = None
     if tier:
@@ -288,10 +418,24 @@ def add_task(p: Project, text: str, queue: str | None = None, skill: str | None 
         raise ConfigError("give --queue or --tier")
     elif queue != PERSON and queue not in p.agents:
         raise ConfigError(f"unknown agent: {queue} (agents: {', '.join(p.agents) or 'none'})")
-    tid = p.board.add(text, queue=queue, skill=skill)
+    if effort:
+        from .providers import effort_support
+        can, reason = effort_support(p.agents[queue].command, p.agents[queue].provider) if queue in p.agents else (False, "a person takes no effort setting")
+        if not can:
+            raise ConfigError(f"{queue} cannot take an effort level: {reason}")
+    tid = p.board.add(text, queue=queue, skill=skill, effort=effort or None)
     if decision and p.board.trace:
         p.board.trace.event(f"task:{tid}", "router", "decision", decision.system or "", "route" if queue != PERSON else "human_review", why, tier=tier)
     return tid, queue, why
+
+
+def _for_task(p: Project, d, row, agent: str):
+    """The dispatcher one task is sent with: the given one, or a copy that asks the agent for the effort this task carries."""
+    eff = row["effort"] if "effort" in row.keys() else None
+    if not eff or not isinstance(d, CommandDispatcher) or agent not in p.agents or (d.override.get(agent) or p.agents[agent]).effort == eff:
+        return d
+    base = d.override.get(agent) or p.agents[agent]
+    return CommandDispatcher(p, d.runner, d.transport, cwd=d.cwd, override={**d.override, agent: replace(base, effort=eff)})
 
 
 def run_pending(p: Project, only: str | None = None, dispatcher: CommandDispatcher | None = None, max_workers: int = 4) -> list[dict]:
@@ -318,6 +462,7 @@ def run_pending(p: Project, only: str | None = None, dispatcher: CommandDispatch
                 wt = worktrees.get(p.root, wk)
                 if wt:
                     dd = CommandDispatcher(p, d.runner, d.transport, cwd=Path(wt["path"]))
+            dd = _for_task(p, dd, p.board.get(tid), agent)
             res = p.board.assign(tid, agent, dd)
             if res.ok:
                 p.board.deliver(tid, dd.outputs.pop(agent, ""))
@@ -363,6 +508,13 @@ def run_task(p: Project, tid: int, dispatcher: CommandDispatcher | None = None) 
     if agent == PERSON or agent not in p.agents:
         return {"id": tid, "agent": agent, "ok": False, "person": agent == PERSON, "reason": "waiting for a person" if agent == PERSON else f"no agent {agent}", "result": None}
     d = dispatcher or CommandDispatcher(p)
+    wk = t["worktree_key"]   # a subtask returned for a fix goes back into the checkout it worked in, as in `run_pending`
+    if wk and isinstance(d, CommandDispatcher) and not d.cwd:
+        from . import worktrees
+        wt = worktrees.get(p.root, wk)
+        if wt:
+            d = CommandDispatcher(p, d.runner, d.transport, cwd=Path(wt["path"]), override=d.override)
+    d = _for_task(p, d, t, agent)
     res = p.board.assign(tid, agent, d)
     out = None
     if res.ok:

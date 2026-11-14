@@ -20,7 +20,7 @@ export const SubNav: React.FC<{ view: View; onView: (v: View) => void }> = ({ vi
         const { label, Icon } = SUB[v]!
         return (
           <button key={v} type="button" role="tab" aria-selected={view === v} tabIndex={view === v ? 0 : -1} data-tab={v} onClick={() => onView(v)}>
-            <Icon className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />{label}
+            <Icon className="icon" aria-hidden="true" />{label}
           </button>
         )
       })}

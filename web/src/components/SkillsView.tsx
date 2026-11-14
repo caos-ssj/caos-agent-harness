@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Copy, Eye, Pencil, Plus, Search, Wrench } from '../icons'
-import { api, SkillInfo, ToolInfo } from '../api'
-import { CAT_ACCENT, CAT_ORDER, catOf, groupSkills } from '../skillCats'
+import { Copy, Eye, Pencil, Plus, Search, Sparkles, Wrench } from '../icons'
+import { api, SkillInfo, SkillOverview, ToolInfo } from '../api'
+import { CAT_ACCENT, catOf, groupSkillsByWorkflow } from '../skillCats'
 import { Markdown } from './Markdown'
+import { SkillLoop } from './SkillLoop'
 
 interface Props {
   skills: SkillInfo[]
@@ -12,6 +13,13 @@ interface Props {
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/
 const NEW = '__new__'
+
+const WORKFLOW_DESC: Record<string, string> = {
+  'Planificar e Investigar': 'contexto, investigación y documentación',
+  'Escribir Código': 'implementación, interfaz y arquitectura',
+  'Auditar / QA': 'pruebas, verificación y cobertura',
+  'Automatización y MCP': 'modelos, router y servidores MCP',
+}
 
 export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkill }) => {
   const [tab, setTab] = useState<'skills' | 'tools'>('skills')
@@ -23,12 +31,16 @@ export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkil
   const [mode, setMode] = useState<'edit' | 'preview'>('preview')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
-  const [err, setErr] = useState<string | null>(null)
+  const [err, setErr] = useState(null as string | null)
 
   useEffect(() => { api.getTools().then((r) => setTools(r.tools || [])).catch(() => undefined) }, [])
+  const [loop, setLoop] = useState<{ rows: SkillOverview[]; min: number }>({ rows: [], min: 20 })
+  const loadLoop = () => { api.getSkillEvidence().then((r) => setLoop({ rows: r.skills || [], min: r.min_decided })).catch(() => undefined) }
+  useEffect(loadLoop, [skills.length])
+  const loopOf = (name: string) => loop.rows.find((r) => r.skill === name)
 
   const visible = useMemo(() => skills.filter((s) => filter === 'all' || (filter === 'local' ? !!s.local : !s.local)), [skills, filter])
-  const groups = useMemo(() => groupSkills(visible, q), [visible, q])
+  const groups = useMemo(() => groupSkillsByWorkflow(visible, q), [visible, q])
   const current = sel && sel !== NEW ? skills.find((s) => s.name === sel) ?? null : null
   const creating = sel === NEW
 
@@ -54,9 +66,10 @@ export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkil
     if (!current) return
     setBusy(true); setErr(null)
     try {
-      await api.cloneSkill(current.name)
-      setNote(`«${current.name}» clonado al proyecto: ya puedes editarlo`)
-      onSkillsChanged?.(); setMode('edit')
+      const cloned = await api.cloneSkill(current.name)
+      const slug = cloned?.name || current.name
+      setNote(`«${slug}» clonado al proyecto: ya puedes editarlo`)
+      onSkillsChanged?.(); setSel(slug); setMode('edit')
     } catch (e: any) { setErr(e.message || 'No se pudo clonar') } finally { setBusy(false) }
   }
 
@@ -74,7 +87,11 @@ export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkil
               <button type="button" role="tab" aria-selected={tab === 'skills'} aria-pressed={tab === 'skills'} onClick={() => setTab('skills')}>Skills ({skills.length})</button>
               <button type="button" role="tab" aria-selected={tab === 'tools'} aria-pressed={tab === 'tools'} onClick={() => setTab('tools')}>MCP &amp; Tools ({tools.length})</button>
             </div>
-            {tab === 'skills' && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setSel(NEW); setDraft({ name: '', description: '', category: 'Proyecto', body: '# Instrucciones\n\n- ' }); setMode('edit'); setErr(null) }}><Plus className="icon" style={{ width: 14, height: 14 }} />Nuevo Skill</button>}
+            {tab === 'skills' && (
+              <button type="button" className="btn btn-sm" onClick={() => { setSel(NEW); setDraft({ name: '', description: '', category: 'Proyecto', body: '# Instrucciones\n\n- ' }); setMode('edit'); setErr(null) }}>
+                <Plus className="icon icon-sm" />Nuevo Skill
+              </button>
+            )}
           </div>
         </div>
         {note && <div className="toast-strip" role="status">{note}</div>}
@@ -90,22 +107,46 @@ export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkil
           <div className="skills-split">
             <aside className="skills-list card" aria-label="Lista de skills">
               <div className="skills-list-top">
-                <label className="search-inline"><Search className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /><input className="field field-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar skills…" aria-label="Filtrar skills" /></label>
+                <label className="search-inline"><Search className="icon icon-sm" aria-hidden="true" /><input className="field field-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar por flujo o nombre…" aria-label="Filtrar skills" /></label>
                 <div className="seg" role="group" aria-label="Origen">
-                  {(['all', 'local', 'bundle'] as const).map((f) => <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{f === 'all' ? 'Todos' : f === 'local' ? 'Locales' : 'Bundle'}</button>)}
+                  {(['all', 'local', 'bundle'] as const).map((f) => <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{f === 'all' ? 'Todas' : f === 'local' ? 'Del Proyecto' : 'Incluidas'}</button>)}
                 </div>
               </div>
               <div className="skills-scroll">
                 {groups.map(({ cat, items }) => (
                   <section key={cat} className="skill-group" style={{ ['--cat' as string]: CAT_ACCENT[cat] || 'var(--ink-3)' }}>
-                    <h3>{cat} <span className="chip">{items.length}</span></h3>
-                    {items.map((s) => (
-                      <button key={s.name} type="button" className={`skill-item ${sel === s.name ? 'on' : ''}`} aria-current={sel === s.name ? 'true' : undefined} onClick={() => { setSel(s.name); setErr(null) }}>
-                        <span className="skill-item-head"><b className="mono">{s.name}</b>
-                          <span className="skill-tags">{s.local ? <span className="chip steel-chip">local</span> : <span className="chip dim">bundle</span>}</span></span>
-                        <small>{s.description}</small>
-                      </button>
-                    ))}
+                    <div className="skill-group-head">
+                      <h3>{cat} <span className="pill-mini">{items.length}</span></h3>
+                      {WORKFLOW_DESC[cat] && <small className="muted">{WORKFLOW_DESC[cat]}</small>}
+                    </div>
+                    {items.map((s) => {
+                      const ev = loopOf(s.name)?.evidence
+                      return (
+                        <div key={s.name} className={`skill-item ${sel === s.name ? 'on' : ''}`}>
+                          <button type="button" className="skill-item-main" aria-current={sel === s.name ? 'true' : undefined} onClick={() => { setSel(s.name); setErr(null) }}>
+                            <span className="skill-item-head">
+                              <span className="with-icon" style={{ minWidth: 0 }}>
+                                <Sparkles className="icon icon-xs" />
+                                <b className="mono">{s.name}</b>
+                              </span>
+                              <span className="skill-tags" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                                {ev && ev.decided > 0 ? (
+                                  <span className="skill-rate" title="Aceptadas a la primera / decididas">{ev.first_pass}/{ev.decided}</span>
+                                ) : (
+                                  <span className={`pill-mini ${s.local ? 'steel' : ''}`}>{s.local ? 'proyecto' : 'incluida'}</span>
+                                )}
+                              </span>
+                            </span>
+                            <small className="skill-item-desc">{s.description}</small>
+                          </button>
+                          {onUseSkill && (
+                            <button type="button" className="btn btn-quiet btn-xs skill-item-use" onClick={() => onUseSkill(s.name)} title={`Usar ${s.name} en Console`}>
+                              Usar
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
                   </section>
                 ))}
                 {groups.length === 0 && <p className="muted mono" style={{ padding: 12 }}>Ningún skill coincide.</p>}
@@ -116,31 +157,50 @@ export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkil
               {!current && !creating ? <p className="muted mono">Elige un skill de la lista.</p> : (
                 <>
                   <div className="skill-detail-head">
-                    <div>
-                      <h2 className="mono">{creating ? 'Nuevo skill' : current!.name}</h2>
-                      <div className="skill-tags">{creating || current?.local ? <span className="chip steel-chip">local del proyecto</span> : <span className="chip dim">bundle · solo lectura</span>}{current?.team_shareable === false && <span className="chip amber-chip">solo local</span>}</div>
+                    <div className="skill-detail-title">
+                      <span className="skill-glyph-mini"><Sparkles className="icon" /></span>
+                      <div>
+                        <h2 className="mono">{creating ? 'Nuevo skill' : current!.name}</h2>
+                        <div className="skill-tags">
+                          {creating || current?.local ? <span className="pill-mini steel">local del proyecto</span> : <span className="pill-mini">bundle · solo lectura</span>}
+                          {current?.team_shareable === false && <span className="pill-mini amber">solo local</span>}
+                        </div>
+                      </div>
                     </div>
                     <div className="skill-actions">
-                      {editable && !creating && <div className="seg" role="group" aria-label="Modo"><button type="button" aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Pencil className="icon" style={{ width: 12, height: 12 }} />Editar</button><button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}><Eye className="icon" style={{ width: 12, height: 12 }} />Vista previa</button></div>}
-                      {current && <button type="button" className="btn btn-sm" onClick={() => onUseSkill?.(current.name)}><Wrench className="icon" style={{ width: 13, height: 13 }} />Usar en Console</button>}
-                      {current && !current.local && <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void clone()}><Copy className="icon" style={{ width: 13, height: 13 }} />Clonar a Proyecto</button>}
-                      {editable && <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void save()}>Guardar</button>}
+                      {editable && !creating && (
+                        <div className="seg" role="group" aria-label="Modo">
+                          <button type="button" aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}><Pencil className="icon icon-xs" />Editar</button>
+                          <button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}><Eye className="icon icon-xs" />Vista previa</button>
+                        </div>
+                      )}
+                      {current && <button type="button" className={`btn ${mode !== 'edit' && current.local ? 'btn-primary ' : ''}btn-sm`} onClick={() => onUseSkill?.(current.name)}><Wrench className="icon icon-sm" />Usar en Console</button>}
+                      {current && !current.local && <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void clone()}><Copy className="icon icon-sm" />Clonar a Proyecto</button>}
+                      {editable && mode === 'edit' && <button type="button" className="btn btn-primary btn-sm" disabled={busy || !draft.name.trim() || !draft.body.trim()} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar'}</button>}
                     </div>
                   </div>
-                  {err && <p className="verdict-err" role="alert">{err}</p>}
+                  {err && <div className="banner err" role="alert"><span>{err}</span></div>}
+
                   {editable && mode === 'edit' ? (
-                    <div className="skill-form">
+                    <div className="skill-editor">
                       <div className="form-2col">
-                        <label>Nombre (slug)<input className="field field-sm" value={draft.name} disabled={!creating} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="mi-skill" /></label>
-                        <label>Categoría<select className="select" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>{[...new Set([...CAT_ORDER, draft.category])].map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+                        <label>Nombre (slug)<input className="field field-sm mono" value={draft.name} disabled={!creating} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="mi-skill" /></label>
+                        <label>Flujo / Categoría
+                          <select className="select select-sm" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
+                            {['Planificar e Investigar', 'Escribir Código', 'Auditar / QA', 'Automatización y MCP', 'Proyecto'].map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </label>
                       </div>
-                      <label>Descripción<input className="field field-sm" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Cuándo debe usar un agente este skill (mín. 8 caracteres)" /></label>
-                      <label>SKILL.md<textarea className="field skill-body" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} rows={16} spellCheck={false} /></label>
+                      <label>Descripción (1 línea)<input className="field field-sm" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Cuándo debe usarla el agente y qué resuelve" /></label>
+                      <label className="skill-body-label">SKILL.md<textarea className="field mono skill-textarea" rows={16} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} /></label>
                     </div>
                   ) : (
-                    <div className="skill-read">
-                      <p className="skill-desc">{current?.description ?? draft.description}</p>
-                      <Markdown text={current?.body ?? draft.body} />
+                    <div className="skill-preview">
+                      {current?.description && <p className="skill-lead">{current.description}</p>}
+                      {current && loopOf(current.name) && (
+                        <SkillLoop row={loopOf(current.name)!} minDecided={loop.min} onChanged={() => { loadLoop(); onSkillsChanged?.() }} />
+                      )}
+                      <Markdown text={current?.body || '(vacío)'} />
                     </div>
                   )}
                 </>
@@ -154,6 +214,8 @@ export const SkillsView: React.FC<Props> = ({ skills, onSkillsChanged, onUseSkil
 }
 
 const ToolRow: React.FC<{ t: ToolInfo }> = ({ t }) => (
-  <div className="tool-mcp-row"><span className="mono bone">{t.name}</span><span className="muted mono" title={t.summary}>{t.summary}</span>
-    <span className={`pill-mini ${t.status === 'online' || t.status === 'ready' ? 'sage' : t.status === 'offline' ? 'coral' : ''}`}>{t.status}</span></div>
+  <article className="tool-row">
+    <div className="tool-row-top"><b>{t.name}</b><span className={`pill-mini ${t.status === 'ready' || t.status === 'online' ? 'sage' : ''}`}>{t.status}</span></div>
+    <small className="mono muted">{t.summary}</small>
+  </article>
 )

@@ -225,6 +225,8 @@ def snapshot(project, scope: str = "project", reports_dir: Path | None = None) -
             "demoted": bool(dem and dem.get("demoted")),
         })
 
+    from . import ledger
+    led = ledger.summary(project)
     return {
         "scope": scope,
         "project": project.root.name,
@@ -237,6 +239,11 @@ def snapshot(project, scope: str = "project", reports_dir: Path | None = None) -
             "p50_latency_ms": round(statistics.median(latencies)) if latencies else None,
             "tokens": {"prompt": prompt_tok, "completion": comp_tok, "total": prompt_tok + comp_tok},
             "gates": _repo_gates(reports_dir),
+            "scout": {
+                "briefs": led.get("scout_briefs", 0),
+                "cached": led.get("scout_cached", 0),
+                "paid_avoided_calls": led.get("paid_avoided_calls", 0),
+            },
         },
         "models": models_out,
         "compare": compare_summary(project, scope),

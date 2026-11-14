@@ -10,14 +10,14 @@ import difflib
 import json
 import os
 import re
-import signal
+import shutil
 import subprocess
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from .. import metrics, providers
+from .. import app, metrics, providers
 from ..skills import load_all
 from .llm import OllamaChat, ProviderChat
 
@@ -187,21 +187,8 @@ def extract_plan_questions(text: str) -> list[dict]:
 
 
 def _kill_group(proc: subprocess.Popen, grace: float = 2.0) -> None:
-    """Ends a command and everything it started: SIGTERM to its process group, then SIGKILL."""
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except (ProcessLookupError, PermissionError):
-            pass
-        try:
-            proc.wait(timeout=grace if sig == signal.SIGTERM else 5)
-            break
-        except subprocess.TimeoutExpired:
-            continue
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
+    """Ends a command and everything it started across POSIX and Windows."""
+    app.terminate_process_tree(proc, grace=grace)
 
 
 def _safe_path(root: Path, rel: str) -> Path:
@@ -308,6 +295,7 @@ class Run:
         self.questions: list[dict] = []
         self.usage: dict = {"prompt_tokens": 0, "completion_tokens": 0}
         self.failover_used: str = ""
+        self.duration_ms: int | None = None
         self.trusted: set[str] = set(initial_trusted or ())
         self._decision = None
         self._trust_this = False
@@ -340,6 +328,7 @@ class Run:
                 "questions": list(self.questions),
                 "usage": dict(self.usage),
                 "failover_used": self.failover_used,
+                "duration_ms": self.duration_ms,
             }
 
     def cancel(self):
@@ -358,15 +347,19 @@ class Run:
         with self._lock:
             if self._cancelled:
                 return None, "", "", "cancelled"
+            if os.name == "nt":
+                shell_cmd = ["powershell", "-NoProfile", "-Command", command] if shutil.which("powershell") else ["cmd", "/c", command]
+            else:
+                shell_cmd = ["bash", "-lc", command]
             proc = subprocess.Popen(
-                ["bash", "-lc", command],
+                shell_cmd,
                 cwd=self.root,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 errors="replace",
-                start_new_session=True,
+                **app.popen_group_kwargs(),
             )
             self._proc = proc
         try:
@@ -677,11 +670,14 @@ class Run:
                 self.status = "finishing"
                 self._changed()
         finally:
+            dur_ms = round((time.perf_counter() - t_start) * 1000)
+            with self._lock:
+                self.duration_ms = dur_ms
             metrics.record_run(
                 self.root,
                 self.provider,
                 self.model,
-                round((time.perf_counter() - t_start) * 1000),
+                dur_ms,
                 ok_run,
                 prompt_tokens=self.usage["prompt_tokens"],
                 completion_tokens=self.usage["completion_tokens"],

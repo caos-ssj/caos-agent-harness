@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, PreflightResponse, ProviderItem, RouterResponse, SessionItem, StateResponse, watchEvents, WorkspaceStatus } from './api'
 import { isDesktop, notifyDesktop, onBackendExit, onDesktopNavigate, openExternalUrl, restartDesktopBackend, syncTrayState, waitForDesktopBackend } from './desktop'
 import { useMedia } from './hooks'
-import { boardCounts, isSpecialKey, View } from './lib'
+import { ago, boardCounts, isSpecialKey, View } from './lib'
 import { usePrefs } from './prefs'
+import { useRunOverview } from './runData'
+import { FamilyEmblem, HouseEmblem } from './emblems'
+import { GitBranch, ShieldCheck } from './icons'
 import { SubNav } from './components/SubNav'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
@@ -12,12 +15,16 @@ import { Board } from './components/Board'
 import { ProvidersView } from './components/ProvidersView'
 import { MetricsView } from './components/MetricsView'
 import { SkillsView } from './components/SkillsView'
+import { RunView } from './components/RunView'
+import { RunDeck } from './components/RunDeck'
+import { setTones } from './tones'
 import { ShareView } from './components/ShareView'
 import { Palette, PaletteItem } from './components/Palette'
 import { Preferences } from './components/Preferences'
 import { PreflightDrawer } from './components/Preflight'
 
 const VIEW_FROM_URL: Record<string, View> = {
+  run: 'run',
   console: 'console',
   board: 'board',
   desk: 'board',
@@ -27,6 +34,9 @@ const VIEW_FROM_URL: Record<string, View> = {
   skills: 'skills',
   share: 'share',
 }
+
+/* Console lives inside Run: every way of asking for the console lands in the room. */
+const asRoom = (v: View): View => (v === 'console' ? 'run' : v)
 
 function initialView(fallback: View): View {
   try {
@@ -38,9 +48,67 @@ function initialView(fallback: View): View {
   }
 }
 
+const BOOT_FAMILIES = ['claude', 'agy', 'codex', 'opencode', 'local'] as const
+
+const fmtClock = () =>
+  new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+const BootCeremony: React.FC<{ motion: string }> = ({ motion }) => {
+  const [open, setOpen] = useState<boolean>(() => {
+    if (import.meta.env.MODE === 'test') return false
+    if (typeof window === 'undefined') return false
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false
+    return motion !== 'focus'
+  })
+
+  useEffect(() => {
+    if (!open) return
+    if (motion === 'focus') {
+      setOpen(false)
+      return
+    }
+    const timer = window.setTimeout(() => setOpen(false), 1550)
+    const onDismiss = () => setOpen(false)
+    window.addEventListener('keydown', onDismiss, { once: true })
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('keydown', onDismiss)
+    }
+  }, [open, motion])
+
+  if (!open) return null
+  return (
+    <div className="boot-ceremony" aria-hidden="true" onClick={() => setOpen(false)}>
+      <HouseEmblem size={52} className="boot-emblem" />
+      <div className="boot-title">caos</div>
+      <div className="boot-stations">
+        {BOOT_FAMILIES.map((f, i) => (
+          <span key={f} className="boot-station" style={{ '--st-idx': i } as React.CSSProperties}>
+            <FamilyEmblem family={f} size={16} />
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export const App: React.FC = () => {
   const [prefs, setPrefs, resetPrefs] = usePrefs()
-  const [view, setView] = useState<View>(() => initialView(prefs.start))
+  const { data: runOverview } = useRunOverview()
+  const [clockText, setClockText] = useState<string>(() => fmtClock())
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockText(fmtClock()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const [view, setView] = useState<View>(() => asRoom(initialView(prefs.start)))
+  const [roomPane, setRoomPane] = useState<'talk' | 'checks'>('talk')
+  useEffect(() => { setTones(prefs.sound) }, [prefs.sound])
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.documentElement.dataset.glow = prefs.glow
+    document.documentElement.dataset.density = prefs.density
+    document.documentElement.dataset.text = prefs.text
+  }, [prefs.glow, prefs.density, prefs.text])
   const [scope, setScope] = useState<'project' | 'global'>('project')
   const mobile = useMedia('(max-width: 720px)')
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -52,7 +120,7 @@ export const App: React.FC = () => {
     } catch {
       /* ignore */
     }
-    return typeof window !== 'undefined' ? window.innerWidth < 1100 : false
+    return true   // collapsed until the person opens it: the conversation and the stations get the width
   })
 
   useEffect(() => {
@@ -87,9 +155,17 @@ export const App: React.FC = () => {
   const [sessionsVersion, setSessionsVersion] = useState(0)
   const pendingTask = useRef<number | null>(null)
 
+  useEffect(() => {   // the address is the view: editing the hash, or going back and forward, moves the page without a reload
+    const onHash = () => { const next = VIEW_FROM_URL[window.location.hash.replace(/^#/, '').toLowerCase()]; if (next) setView(asRoom(next)) }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
   const prevNeeds = useRef(0)
 
-  const go = useCallback((next: View) => {
+  const go = useCallback((to: View) => {
+    const next = asRoom(to)
+    if (to === 'console') setRoomPane('talk')
     setView(next)
     if (mobile) setSidebarCollapsed(true)
     try {
@@ -364,6 +440,7 @@ export const App: React.FC = () => {
 
   const paletteItems: PaletteItem[] = useMemo(() => [
     { id: 'v-console', group: 'Navegar', label: 'Console', hint: 'Plan / Act / Intent', run: () => go('console') },
+    { id: 'v-run', group: 'Navegar', label: 'Run', hint: 'Ciclos, rama harness/landed, revisores y costes', run: () => go('run') },
     { id: 'v-board', group: 'Navegar', label: 'Board', hint: 'Lista / Kanban / Veredictos', run: () => go('board') },
     { id: 'v-providers', group: 'Navegar', label: 'Models & Providers', hint: 'Ollama / Cloud / Router', run: () => go('providers') },
     { id: 'v-metrics', group: 'Navegar', label: 'Metrics', hint: 'KPIs operativos y Smoke Test', run: () => go('metrics') },
@@ -376,11 +453,28 @@ export const App: React.FC = () => {
     { id: 'a-prefs', group: 'Acciones', label: 'Preferencias', run: () => setPrefsOpen((o) => !o) },
   ], [go, counts.runnable, runPending, sidebarCollapsed, toggleSidebar, preflight])
 
+  const activeStations = useMemo(
+    () => (runOverview?.stations ?? []).filter((s) => s.running),
+    [runOverview?.stations],
+  )
+  const lastCycle = runOverview?.cycles?.[0] ?? null
+  const dirtyCount = wsStatus?.dirty_files?.length ?? 0
+
   if (!backendReady) {
     return (
-      <div className={`app desktop-boot density-${prefs.density} text-${prefs.text} motion-${prefs.motion}`}>
+      <div className={`app desktop-boot density-${prefs.density} text-${prefs.text} motion-${prefs.motion} glow-${prefs.glow}`}>
         <div className="desktop-boot-card" role="status" aria-live="polite">
-          <div className="desktop-boot-mark" aria-hidden="true">CAOS</div>
+          <div className="desktop-boot-mark" aria-hidden="true">
+            <HouseEmblem size={44} className="boot-emblem" />
+            <span className="boot-title">caos</span>
+          </div>
+          <div className="boot-stations" aria-hidden="true">
+            {BOOT_FAMILIES.map((f, i) => (
+              <span key={f} className="boot-station" style={{ '--st-idx': i } as React.CSSProperties}>
+                <FamilyEmblem family={f} size={15} />
+              </span>
+            ))}
+          </div>
           <h1>{backendErr ? 'Error iniciando motor local' : 'Iniciando estación CAOS'}</h1>
           <p className="muted">
             {backendErr || 'Conectando con el servidor Python en loopback, cargando workspace y verificando agentes…'}
@@ -398,7 +492,8 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className={`app density-${prefs.density} text-${prefs.text} motion-${prefs.motion}`}>
+    <div className={`app density-${prefs.density} text-${prefs.text} motion-${prefs.motion} glow-${prefs.glow}`}>
+      <BootCeremony motion={prefs.motion} />
       <a className="skip" href="#main">Saltar al contenido</a>
 
       <Header
@@ -450,8 +545,13 @@ export const App: React.FC = () => {
 
         <main id="main" className="main">
           <SubNav view={view} onView={go} />
-          {view === 'console' && (
-            <div className="view" key={`console-${wsKey}`}>
+          {view === 'run' && (
+            <div className={`view room pane-${roomPane}`} key={`run-${wsKey}`}>
+              <div className="seg room-switch" role="group" aria-label="Conversación o verificación">
+                <button type="button" aria-pressed={roomPane === 'talk'} onClick={() => setRoomPane('talk')}>Console</button>
+                <button type="button" aria-pressed={roomPane === 'checks'} onClick={() => setRoomPane('checks')}>Verificación</button>
+              </div>
+              <div className="room-main">
               <Console
                 state={state}
                 agents={state?.agents ?? []}
@@ -471,6 +571,8 @@ export const App: React.FC = () => {
                 initialSkill={selectedSkill}
                 focusSignal={consoleSignal}
               />
+              </div>
+              <aside className="room-side" aria-label="Verificación"><RunDeck /><RunView /></aside>
             </div>
           )}
 
@@ -531,10 +633,64 @@ export const App: React.FC = () => {
         </main>
       </div>
 
-      <footer className="foot">
-        <span>CAOS · {state?.project || 'workspace'}</span>
-        <span className="muted">alcance {scope === 'project' ? 'proyecto' : 'global'} · {providers.filter((p) => p.status === 'online' || p.status === 'key_present' || p.status === 'ready').length}/{providers.length || 1} motores{desktopMode && backendPort ? ` · desktop:${backendPort}` : ''}</span>
-        <span className="muted">⌘K paleta</span>
+      <footer className="foot" data-backend-port={desktopMode && backendPort ? backendPort : undefined}>
+        <span className="foot-item">
+          <GitBranch className="icon icon-xs" />
+          <span className="mono">{wsStatus?.branch || runOverview?.landed?.branch || '—'}</span>
+          {dirtyCount > 0 && <span className="muted">{`(${dirtyCount} pendiente${dirtyCount === 1 ? '' : 's'})`}</span>}
+        </span>
+        <span className="foot-sep" aria-hidden="true" />
+        <span className="foot-item">
+          {activeStations.length > 0 ? (
+            activeStations.map((s) => (
+              <span key={s.name} className={`foot-live fam-${s.family ?? 'tool'}`}>
+                <span className="live-pulse" aria-hidden="true" />
+                <FamilyEmblem family={s.family} size={13} />
+                <span className="mono">{s.name}</span>
+              </span>
+            ))
+          ) : running || counts.moving > 0 ? (
+            <span className="foot-live">
+              <span className="live-pulse" aria-hidden="true" />
+              <span>{counts.moving > 0 ? `${counts.moving} en curso` : 'ejecutando'}</span>
+            </span>
+          ) : (
+            <span className="muted">en reposo</span>
+          )}
+        </span>
+        <span className="foot-sep" aria-hidden="true" />
+        <span className="foot-item">
+          {lastCycle ? (
+            <>
+              <span
+                className={`pill-mini ${
+                  lastCycle.status === 'landed'
+                    ? 'sage'
+                    : lastCycle.status === 'rejected' || lastCycle.status === 'verify_failed' || lastCycle.status === 'conflict'
+                      ? 'coral'
+                      : 'amber'
+                }`}
+              >
+                {lastCycle.key} · {lastCycle.status}
+              </span>
+              <span className="muted">{ago(lastCycle.at)}</span>
+            </>
+          ) : preflight ? (
+            <>
+              <ShieldCheck className="icon icon-xs" />
+              <span
+                className={`pill-mini ${
+                  preflight.verdict === 'ready' ? 'sage' : preflight.verdict === 'blocked' ? 'coral' : 'amber'
+                }`}
+              >
+                {preflight.verdict}
+              </span>
+            </>
+          ) : (
+            <span className="muted">sin verificación</span>
+          )}
+        </span>
+        <span className="mono foot-time">{clockText}</span>
       </footer>
 
       <Palette

@@ -34,9 +34,9 @@ export const SkillPopover: React.FC<SkillPopoverProps> = ({ skills, value, onPic
   return (
     <div className="skillpop" ref={box}>
       <button type="button" className="select skill-btn" aria-expanded={open} aria-haspopup="dialog" onClick={() => onOpenChange(!open)} title="Skill activo">
-        <Wrench className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+        <Wrench className="icon icon-sm" aria-hidden="true" />
         <span className="engine-label">{value === 'auto' ? 'Sin skill' : value}</span>
-        <ChevronDown className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+        <ChevronDown className="icon icon-sm" aria-hidden="true" />
       </button>
       {pres.mounted && (
         <div className="pop skill-pop" ref={popRef} data-leaving={pres.leaving ? '' : undefined} role="dialog" aria-label="Elegir skill">

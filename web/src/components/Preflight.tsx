@@ -18,7 +18,7 @@ const needsKey = (c: PreflightCheck) => ['cloud', 'agents', 'engine', 'failover'
 
 export const VerdictBadge: React.FC<{ verdict: PreflightResponse['verdict'] }> = ({ verdict }) => {
   const v = VERDICT[verdict]
-  return <span className={`verdict-badge ${v.cls}`}><v.Icon className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />{v.label}</span>
+  return <span className={`verdict-badge ${v.cls}`}><v.Icon className="icon icon-sm" aria-hidden="true" />{v.label}</span>
 }
 
 interface DrawerProps {
@@ -40,8 +40,8 @@ export const PreflightDrawer: React.FC<DrawerProps> = ({ open, data, loading, on
         <h2>Preflight</h2>
         {data && <VerdictBadge verdict={data.verdict} />}
         <span className="spacer" />
-        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Volver a comprobar" title="Volver a comprobar (con sondeos de red)" disabled={loading} onClick={onRecheck}><RefreshCw className={`icon ${loading ? 'spin' : ''}`} style={{ width: 15, height: 15 }} aria-hidden="true" /></button>
-        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Cerrar" onClick={onClose}><X className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" /></button>
+        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Volver a comprobar" title="Volver a comprobar (con sondeos de red)" disabled={loading} onClick={onRecheck}><RefreshCw className={`icon ${loading ? 'spin' : ''}`} aria-hidden="true" /></button>
+        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Cerrar" onClick={onClose}><X className="icon" aria-hidden="true" /></button>
       </header>
       {!data && <p className="muted mono">{loading ? 'Comprobando…' : 'Sin datos.'}</p>}
       {data && (
@@ -52,9 +52,9 @@ export const PreflightDrawer: React.FC<DrawerProps> = ({ open, data, loading, on
               const L = LEVEL_ICON[c.level]
               return (
                 <li key={c.id} className={`lvl-${c.level}`}>
-                  <L.Icon className={`icon ${L.cls}`} style={{ width: 15, height: 15 }} aria-hidden="true" />
+                  <L.Icon className={`icon ${L.cls}`} aria-hidden="true" />
                   <div><b>{c.label}</b><small>{c.detail}</small>{c.action && c.level !== 'ok' && <small className="preflight-action">{c.action}</small>}</div>
-                  {needsKey(c) && <button type="button" className="btn btn-xs" onClick={() => { onClose(); onGoProviders() }}><KeyRound className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Key</button>}
+                  {needsKey(c) && <button type="button" className="btn btn-xs" onClick={() => { onClose(); onGoProviders() }}><KeyRound className="icon icon-xs" aria-hidden="true" />Key</button>}
                 </li>
               )
             })}

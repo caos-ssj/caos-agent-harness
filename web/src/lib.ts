@@ -3,7 +3,7 @@ import { BoardStats, BoardSummary, Task } from './api'
 
 /* Shared words, state mappings, and helpers aligned between Web and TUI. */
 
-export type View = 'console' | 'board' | 'providers' | 'metrics' | 'skills' | 'share'
+export type View = 'run' | 'console' | 'board' | 'providers' | 'metrics' | 'skills' | 'share'
 
 export const NEEDS = new Set(['to_review', 'verify', 'person'])
 export const MOVING = new Set(['pending', 'sending', 'sent'])

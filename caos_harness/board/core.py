@@ -72,9 +72,11 @@ class Board:
         self.clock = clock
 
     def _migrate(self) -> None:
-        """Adds the columns of orchestration to a board written by an older version. Idempotent: only what is missing is added."""
+        """Adds the columns of orchestration, of the order inside a queue (`position`) and of the effort a task asks for to a board
+        written by an older version. Idempotent: only what is missing is added. A task with no `position` is ordered by its id."""
         have = {r[1] for r in self.conn.execute("PRAGMA table_info(tasks)").fetchall()}
-        for col, kind in (("parent_id", "INTEGER"), ("criteria", "TEXT"), ("worktree_key", "TEXT")):
+        for col, kind in (("parent_id", "INTEGER"), ("criteria", "TEXT"), ("worktree_key", "TEXT"),
+                          ("position", "REAL"), ("effort", "TEXT")):
             if col not in have:
                 self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
         self.conn.commit()
@@ -111,16 +113,17 @@ class Board:
             self.trace.event(f"task:{task_id}", "board", "transition", agent or "", too, f"from:{frm}" if frm else "")
 
     def add(self, text: str, queue: str | None = None, skill: str | None = None, parent_id: int | None = None,
-            criteria: str | None = None, worktree_key: str | None = None) -> int:
+            criteria: str | None = None, worktree_key: str | None = None, effort: str | None = None) -> int:
         """`skill` names the role skill the agent must load first (see `caos_harness.skills`). `parent_id` groups a subtask under the task
-        that split it; `criteria` is what the delivery must demonstrate; `worktree_key` names the isolated checkout it works in."""
+        that split it; `criteria` is what the delivery must demonstrate; `worktree_key` names the isolated checkout it works in;
+        `effort` (low, medium or high) is how hard its agent is asked to think, where the agent's tool takes that setting."""
         text = " ".join(CONTROL_RE.sub(" ", text).split())
         if not text:
             raise ValueError("empty task")
         criteria = " ".join(CONTROL_RE.sub(" ", criteria or "").split()) or None
         with self._write():
-            cur = self.conn.execute("INSERT INTO tasks (text, created, queue, skill, parent_id, criteria, worktree_key) VALUES (?,?,?,?,?,?,?)",
-                                    (text, self.clock(), queue, skill, parent_id, criteria, worktree_key))
+            cur = self.conn.execute("INSERT INTO tasks (text, created, queue, skill, parent_id, criteria, worktree_key, effort) VALUES (?,?,?,?,?,?,?,?)",
+                                    (text, self.clock(), queue, skill, parent_id, criteria, worktree_key, effort or None))
             self._move(cur.lastrowid, "", "pending")
         return cur.lastrowid
 
@@ -132,7 +135,8 @@ class Board:
             return Assigned(False, "agent_busy")
         text = row["text"]
         if row["review"] == "redo" and row["review_note"]:  # what to fix goes first
-            text = f"Returned by the reviewer, fix this and keep what was already right: {row['review_note']} — Original task: {text}"
+            note = " ".join(CONTROL_RE.sub(" ", re.sub(r"\s*\n\s*", " | ", row["review_note"].strip())).split())   # several notes, one per line, travel as one line
+            text = f"Returned by the reviewer, fix this and keep what was already right: {note} — Original task: {text}"
         crit = row["criteria"] if "criteria" in row.keys() else None
         if row["skill"]:  # the pointer to the skill goes first, so the agent starts from the same rules every time
             text = f"Load the skill '{row['skill']}' before starting. " + (f"Acceptance criteria: {crit}. " if crit else "") + f"Task: {text}"
@@ -198,6 +202,30 @@ class Board:
                 self.trace.event(f"task:{task_id}", "board", "requeue", queue, "pending", f"from:{row['queue']}")
         return n == 1
 
+    def reorder(self, task_id: int, before_id: int | None = None) -> bool:
+        """Moves a task that has not been sent to just before `before_id` in its own queue, or to the end of that queue with None.
+        The tasks of the queue keep the same set of places and only trade them, so other queues and later tasks are not disturbed.
+        A task being sent, delivered or closed is never reordered, and neither is one placed against a task of another queue."""
+        if before_id == task_id:
+            return False
+        with self._write():
+            row = self.conn.execute("SELECT queue FROM tasks WHERE id=? AND status='pending'", (task_id,)).fetchone()
+            if not row:
+                return False
+            lane = self.conn.execute("SELECT id, COALESCE(position, id) AS place FROM tasks WHERE status='pending' AND queue IS ? "
+                                     "ORDER BY place, id", (row["queue"],)).fetchall()
+            ids, places = [r["id"] for r in lane], [r["place"] for r in lane]
+            if before_id is not None and before_id not in ids:
+                return False
+            ids.remove(task_id)
+            ids.insert(ids.index(before_id) if before_id is not None else len(ids), task_id)
+            if ids == [r["id"] for r in lane]:
+                return False
+            self.conn.executemany("UPDATE tasks SET position=? WHERE id=?", list(zip(places, ids)))
+            if self.trace:
+                self.trace.event(f"task:{task_id}", "board", "reorder", row["queue"] or "", "pending", f"before:{before_id}" if before_id else "end")
+        return True
+
     def discard(self, task_id: int) -> bool:
         with self._write():
             n = self.conn.execute("UPDATE tasks SET status='discarded' WHERE id=? AND status='pending'", (task_id,)).rowcount
@@ -222,7 +250,7 @@ class Board:
             return self.conn.execute("SELECT * FROM tasks WHERE parent_id=? ORDER BY id", (parent_id,)).fetchall()
 
     def pending(self, queue: str | None = None) -> list:
-        q = "SELECT * FROM tasks WHERE status='pending'" + (" AND queue=?" if queue else "") + " ORDER BY id"
+        q = "SELECT * FROM tasks WHERE status='pending'" + (" AND queue=?" if queue else "") + " ORDER BY COALESCE(position, id), id"
         with self.lock:
             return self.conn.execute(q, (queue,) if queue else ()).fetchall()
 

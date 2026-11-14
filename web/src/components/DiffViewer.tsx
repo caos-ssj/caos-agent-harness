@@ -192,7 +192,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   const plusBtn = (cite: string, file: string, lineNum: number | string) => canAnnotate && (
     <button type="button" className="diff-plus" title={onSendDrafts ? 'Comentar esta línea' : annotateLabel} aria-label={`${annotateLabel}: ${file} line ${lineNum}`} onClick={() => annotate(cite)}>
-      {onSendDrafts ? <MessageSquarePlus className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /> : <Plus className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />}
+      {onSendDrafts ? <MessageSquarePlus className="icon icon-sm" aria-hidden="true" /> : <Plus className="icon icon-sm" aria-hidden="true" />}
     </button>
   )
   const citeOf = (file: string, ln: DiffLine) => {
@@ -204,8 +204,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     <div className="diff-viewer" role="region" aria-label="Unified code diff">
       <div className="diff-toolbar">
         <div className="seg" role="group" aria-label="Vista del diff">
-          <button type="button" aria-pressed={mode === 'unified'} onClick={() => setMode('unified')} title="Una columna"><Rows2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Unificado</button>
-          <button type="button" aria-pressed={mode === 'split'} onClick={() => setMode('split')} title="Antes y después, lado a lado"><Columns2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Split</button>
+          <button type="button" aria-pressed={mode === 'unified'} onClick={() => setMode('unified')} title="Una columna"><Rows2 className="icon icon-sm" aria-hidden="true" />Unificado</button>
+          <button type="button" aria-pressed={mode === 'split'} onClick={() => setMode('split')} title="Antes y después, lado a lado"><Columns2 className="icon icon-sm" aria-hidden="true" />Split</button>
         </div>
         <span className="mono muted">{blocks.length} {blocks.length === 1 ? 'archivo' : 'archivos'}</span>
       </div>
@@ -222,7 +222,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             <header className="diff-file-head">
               <span className="diff-file-name mono" title={blk.file}>{blk.file}</span>
               <span className="diff-counts mono" title={`${blk.additions} added, ${blk.deletions} removed, ${total} lines in this block`}>
-                {blk.redacted ? <b className="withheld-tag"><Lock className="icon" style={{ width: 11, height: 11 }} aria-hidden="true" />no text</b> : (
+                {blk.redacted ? <b className="withheld-tag"><Lock className="icon icon-xs" aria-hidden="true" />no text</b> : (
                   <>
                     <b className="plus">+{blk.additions}</b>
                     <b className="minus">-{blk.deletions}</b>
@@ -231,7 +231,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 )}
               </span>
               <button type="button" className="btn btn-quiet btn-sm" onClick={() => copyRaw(blk.file, blk.lines)}>
-                {copiedFile === blk.file ? <Check className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /> : <Copy className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />}
+                {copiedFile === blk.file ? <Check className="icon icon-sm" aria-hidden="true" /> : <Copy className="icon icon-sm" aria-hidden="true" />}
                 {copiedFile === blk.file ? 'Copied' : 'Copy'}
               </button>
             </header>
@@ -256,7 +256,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   return <div key={li} className="diff-line hunk"><span className="ln" /><span className="ln" /><span className="sig">@@</span><code className="code">{ln.text}</code></div>
                 }
                 if (ln.type === 'note') {
-                  return <div key={li} className="diff-line note"><span className="note-text">{blk.redacted ? <Lock className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" /> : null}{ln.text}</span></div>
+                  return <div key={li} className="diff-line note"><span className="note-text">{blk.redacted ? <Lock className="icon icon-xs" aria-hidden="true" /> : null}{ln.text}</span></div>
                 }
                 const lineNum = ln.newNo ?? ln.oldNo ?? ''
                 return (
@@ -272,7 +272,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             </div>
             {foldable && (
               <button type="button" className="diff-fold" aria-expanded={open} aria-controls={bodyId} onClick={() => setUnfolded((cur) => ({ ...cur, [key]: !open }))}>
-                {open ? <ChevronUp className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /> : <ChevronDown className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />}
+                {open ? <ChevronUp className="icon icon-sm" aria-hidden="true" /> : <ChevronDown className="icon icon-sm" aria-hidden="true" />}
                 {open ? `Show fewer lines` : `Show all ${total} lines (${total - FOLD_SHOWS} more)`}
               </button>
             )}
@@ -287,7 +287,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               <code className="mono muted">{composing.cite}</code>
               <input className="field field-sm" autoFocus value={composing.text} placeholder="¿Qué debe cambiar aquí? (Enter guarda el borrador)" onChange={(e) => setComposing({ ...composing, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') setComposing(null) }} />
               <button type="submit" className="btn btn-xs">Guardar</button>
-              <button type="button" className="btn btn-quiet btn-xs btn-icon" aria-label="Cancelar" onClick={() => setComposing(null)}><X className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" /></button>
+              <button type="button" className="btn btn-quiet btn-xs btn-icon" aria-label="Cancelar" onClick={() => setComposing(null)}><X className="icon icon-xs" aria-hidden="true" /></button>
             </form>
           )}
           {drafts.length > 0 && (
@@ -296,12 +296,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               <ul className="draft-list">
                 {drafts.map((d) => (
                   <li key={d.id}><code className="mono">{d.cite}</code><span>{d.note || <em className="muted">sin nota</em>}</span>
-                    <button type="button" className="btn btn-quiet btn-xs btn-icon" aria-label="Quitar borrador" onClick={() => setDrafts((all) => all.filter((x) => x.id !== d.id))}><X className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" /></button>
+                    <button type="button" className="btn btn-quiet btn-xs btn-icon" aria-label="Quitar borrador" onClick={() => setDrafts((all) => all.filter((x) => x.id !== d.id))}><X className="icon icon-xs" aria-hidden="true" /></button>
                   </li>
                 ))}
               </ul>
               <div className="draft-foot">
-                <button type="button" className="btn btn-primary btn-sm" onClick={sendDrafts}><Send className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Enviar {drafts.length} al compositor</button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={sendDrafts}><Send className="icon icon-sm" aria-hidden="true" />Enviar {drafts.length} al compositor</button>
                 <button type="button" className="btn btn-quiet btn-sm" onClick={() => setDrafts([])}>Descartar</button>
               </div>
             </>

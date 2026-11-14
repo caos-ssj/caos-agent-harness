@@ -66,6 +66,7 @@ describe('ProvidersView', () => {
 
   it('lists every local model in a table, never hidden behind a count, with its measured precision', async () => {
     view()
+    fireEvent.click(await screen.findByRole('tab', { name: /Modelos Locales/i }))
     const region = await screen.findByRole('region', { name: 'Modelos locales' })
     const more = within(region).queryByRole('button', { name: /models not measured/ })   // the unmeasured tail is folded, one click away
     if (more) fireEvent.click(more)
@@ -117,6 +118,7 @@ describe('ProvidersView', () => {
       { provider: 'ollama', model: 'qwen2.5:7b', ok: true, latency_ms: 420, json_ok: false, tool_calls: 0, answer: 'hola', prompt_tokens: 5, completion_tokens: 2, error: '' },
       { provider: 'ollama', model: 'llama3.2:3b', ok: true, latency_ms: 210, json_ok: true, tool_calls: 0, answer: '{"a":1}', prompt_tokens: 5, completion_tokens: 3, error: '' }] })
     view()
+    fireEvent.click(await screen.findByRole('tab', { name: /Router y Comparador/i }))
     const a = await screen.findByLabelText('Motor A')
     expect((a as HTMLSelectElement).value).toBe('ollama::llama3.2:3b')                                  // measured models come first
     await waitFor(() => expect((screen.getByLabelText('Motor B') as HTMLSelectElement).value).toBe('ollama::qwen2.5:7b'))   // local against local by default

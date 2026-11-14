@@ -44,17 +44,26 @@ export const Preferences: React.FC<PreferencesProps> = ({ open, prefs, onChange,
         </div>
       </fieldset>
       <fieldset>
+        <legend>Brillo ambiental</legend>
+        <div className="seg" role="group" aria-label="Brillo ambiental">
+          <button type="button" aria-pressed={prefs.glow === 'subtle'} onClick={() => onChange({ glow: 'subtle' })}>Sutil</button>
+          <button type="button" aria-pressed={prefs.glow === 'medium'} onClick={() => onChange({ glow: 'medium' })}>Medio</button>
+          <button type="button" aria-pressed={prefs.glow === 'high'} onClick={() => onChange({ glow: 'high' })}>Alto</button>
+        </div>
+      </fieldset>
+      <fieldset>
         <legend>Densidad</legend>
         <div className="seg">
           <button type="button" aria-pressed={prefs.density === 'compact'} onClick={() => onChange({ density: 'compact' })}>Compacta</button>
-          <button type="button" aria-pressed={prefs.density === 'comfortable'} onClick={() => onChange({ density: 'comfortable' })}>Cómoda</button>
+          <button type="button" aria-pressed={prefs.density === 'comfortable'} onClick={() => onChange({ density: 'comfortable' })}>Equilibrada</button>
+          <button type="button" aria-pressed={prefs.density === 'wide'} onClick={() => onChange({ density: 'wide' })}>Amplia</button>
         </div>
       </fieldset>
       <fieldset>
         <legend>Texto</legend>
         <div className="seg">
           <button type="button" aria-pressed={prefs.text === 'standard'} onClick={() => onChange({ text: 'standard' })}>Estándar</button>
-          <button type="button" aria-pressed={prefs.text === 'large'} onClick={() => onChange({ text: 'large' })}>Grande</button>
+          <button type="button" aria-pressed={prefs.text === 'large'} onClick={() => onChange({ text: 'large' })}>Grande (vídeo)</button>
         </div>
       </fieldset>
       <fieldset>
@@ -88,6 +97,13 @@ export const Preferences: React.FC<PreferencesProps> = ({ open, prefs, onChange,
         <label className="ws-check">
           <input type="checkbox" checked={prefs.inspector} onChange={(e) => onChange({ inspector: e.target.checked })} />
           Abierto por defecto (en pantallas anchas)
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Sonido</legend>
+        <label className="ws-check">
+          <input type="checkbox" checked={prefs.sound} onChange={(e) => onChange({ sound: e.target.checked })} />
+          Tonos al aterrizar un cambio, al fallar un test y cuando algo espera por ti
         </label>
       </fieldset>
       <fieldset>

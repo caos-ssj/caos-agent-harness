@@ -63,13 +63,32 @@ def family(a: app.Agent) -> str | None:
     return "local" if b == "ollama" else None
 
 
+def _models_for(a: app.Agent, fam: str | None, cur: str | None) -> list[str]:
+    from . import providers
+    base: list[str] = []
+    if fam in providers.CLIS:
+        base = list(providers.CLIS[fam].get("models") or providers.CLIS[fam].get("free_models") or [])
+        if fam == "opencode" and "opencode/big-pickle" not in base:
+            base.append("opencode/big-pickle")
+    elif fam == "local":
+        base = ["qwen2.5:7b", "qwen2.5-coder:7b", "llama3.2:3b", "qwen3.5:4b", "granite4.1:3b"]
+    elif fam == "api" and a.provider in providers.API:
+        base = list(providers.API[a.provider].get("models") or [])
+    if cur and cur not in base:
+        base = [cur, *base]
+    return base
+
+
 def _describe(a: app.Agent) -> dict:
+    from . import providers
     fam = family(a)
     installed = True
-    if fam in KNOWN_BINS:
-        installed = shutil.which(Path(a.command[0]).name) is not None
+    if fam in KNOWN_BINS and a.command:
+        p0 = Path(a.command[0])
+        installed = (p0.is_absolute() and p0.is_file()) or shutil.which(p0.name) is not None
+    cur_model = providers.model_of(a.command, a.provider, a.model, a.system)
     return {"name": a.name, "family": fam, "kind": {"api": "api", "local": "local"}.get(fam or "", "cli" if fam else "command"),
-            "model": a.model or a.system, "installed": installed, "capable": fam is not None and installed}
+            "model": cur_model, "models": _models_for(a, fam, cur_model), "installed": installed, "capable": fam is not None and installed}
 
 
 def available_orchestrators(project: app.Project) -> list[dict]:
@@ -173,10 +192,42 @@ def _factory(project: app.Project, factory=None):
     return factory or _default_factory(project)
 
 
-def ask(project: app.Project, agent: str, prompt: str, factory=None, cwd: Path | None = None, readonly: bool = True) -> str:
+def with_agent_model(a: app.Agent, model: str | None) -> app.Agent:
+    """`a` configured to run `model` when `model` is given and differs from its own; `a` untouched otherwise."""
+    from . import providers
+    if not model or not isinstance(model, str):
+        return a
+    model = model.strip()
+    cur = providers.model_of(a.command, a.provider, a.model, a.system)
+    if not model or model == cur:
+        return a
+    if not providers.MODEL.fullmatch(model):
+        raise app.ConfigError(f"invalid model name: {model}")
+    if a.provider:
+        return dataclasses.replace(a, model=model)
+    cmd = list(a.command)
+    if not cmd:
+        return a
+    b = Path(cmd[0]).name
+    if b == "ollama" and len(cmd) >= 3 and cmd[1] == "run":
+        return dataclasses.replace(a, command=(cmd[0], "run", model, *cmd[3:]), model=model, system=model)
+    if b in providers.MODEL_FLAG:
+        flag = providers.MODEL_FLAG[b]
+        if any(x in ("--model", "-m") or x.startswith("--model=") or x.startswith("-m=") for x in cmd):
+            return dataclasses.replace(a, command=tuple(_set_flag(cmd, ("--model", "-m"), model, 1)), model=model)
+        if b == "codex" and cmd[-1] == "-":
+            return dataclasses.replace(a, command=tuple([*cmd[:-1], flag, model, "-"]), model=model)
+        if b == "agy" and "-p" in cmd:
+            idx = cmd.index("-p")
+            return dataclasses.replace(a, command=tuple([*cmd[:idx], flag, model, *cmd[idx:]]), model=model)
+        return dataclasses.replace(a, command=tuple(_set_flag(cmd, (flag,), model, 1)), model=model)
+    return a
+
+
+def ask(project: app.Project, agent: str, prompt: str, factory=None, cwd: Path | None = None, readonly: bool = True, model: str | None = None) -> str:
     """One question to an agent, outside the board. Read-only form by default; whatever it fails with is raised."""
-    a = project.agents[agent]
-    override = {agent: readonly_agent(a, PLAN_TIMEOUT)} if readonly else None
+    a = with_agent_model(project.agents[agent], model)
+    override = {agent: readonly_agent(a, PLAN_TIMEOUT)} if readonly else ({agent: a} if a != project.agents[agent] else None)
     d = _factory(project, factory)(cwd, override)
     d.send(agent, prompt)
     return d.outputs.pop(agent, "")
@@ -390,7 +441,18 @@ def normalize_plan(raw: dict, project: app.Project, pool: list[str] | None = Non
         if given:
             renamed.setdefault(given, sid)   # what another subtask called it -> the id it ends up with
         raw_deps[sid] = s.get("depends_on")
-        subs.append({"id": sid, "title": _clip(s.get("title"), 80) or task[:60], "agent": agent, "mode": mode, "skill": skill,
+        s_model = str(s.get("model") or "").strip() or None
+        if s_model:
+            from . import providers
+            if not providers.MODEL.fullmatch(s_model):
+                if strict:
+                    raise app.ConfigError(f"subtask {i + 1}: invalid model '{s_model}'")
+                s_model = None
+        if not s_model:
+            from . import providers
+            ag_obj = project.agents[agent]
+            s_model = providers.model_of(ag_obj.command, ag_obj.provider, ag_obj.model, ag_obj.system)
+        subs.append({"id": sid, "title": _clip(s.get("title"), 80) or task[:60], "agent": agent, "model": s_model, "mode": mode, "skill": skill,
                      "depends_on": [], "task": task, "criteria": _clip(s.get("criteria"), MAX_CRITERIA),
                      # a paid executor gets a brief unless told otherwise; a free one reads for itself
                      "scout": bool(scout_name) and agent != scout_name and (s["scout"] if isinstance(s.get("scout"), bool)
@@ -411,9 +473,18 @@ def normalize_plan(raw: dict, project: app.Project, pool: list[str] | None = Non
     goal = _clip(raw.get("goal"), MAX_GOAL)
     if not goal:
         raise app.ConfigError("the plan needs a goal")
-    return {"goal": goal, "orchestrator": orchestrator, "pool": allowed, "scout": scout_name, "summary": _clip(raw.get("summary"), 600),
-            "recommended_orchestrator": _clip(raw.get("recommended_orchestrator"), 40), "subtasks": subs,
-            "source": raw.get("source") or "edited", "note": _clip(raw.get("note"), 300)}
+    from . import providers
+    orch_model = str(raw.get("orchestrator_model") or "").strip() or None
+    if orch_model and not providers.MODEL.fullmatch(orch_model):
+        if strict:
+            raise app.ConfigError(f"invalid orchestrator model: {orch_model}")
+        orch_model = None
+    if not orch_model:
+        oa = project.agents[orchestrator]
+        orch_model = providers.model_of(oa.command, oa.provider, oa.model, oa.system)
+    return {"goal": goal, "orchestrator": orchestrator, "orchestrator_model": orch_model, "pool": allowed, "scout": scout_name,
+            "summary": _clip(raw.get("summary"), 600), "recommended_orchestrator": _clip(raw.get("recommended_orchestrator"), 40),
+            "subtasks": subs, "source": raw.get("source") or "edited", "note": _clip(raw.get("note"), 300)}
 
 
 def resolve_scout(project: app.Project, choice: str | None, workers: list[str]) -> str | None:
@@ -431,7 +502,16 @@ def resolve_scout(project: app.Project, choice: str | None, workers: list[str]) 
     return cands[0] if cands else None
 
 
-def plan_orchestration(project: app.Project, goal: str, orchestrator: str, pool: list[str] | None = None, factory=None, scout: str | None = "auto") -> dict:
+def plan_orchestration(
+    project: app.Project,
+    goal: str,
+    orchestrator: str,
+    pool: list[str] | None = None,
+    factory=None,
+    scout: str | None = "auto",
+    orchestrator_model: str | None = None,
+    agent_models: dict[str, str] | None = None,
+) -> dict:
     """Asks the orchestrator for a split and returns it ready to edit. When it fails or answers without a usable plan the person still
     gets an editable proposal spread over the pool, with the reason in `note`."""
     goal = _clip(goal, MAX_GOAL)
@@ -442,10 +522,11 @@ def plan_orchestration(project: app.Project, goal: str, orchestrator: str, pool:
     workers = [n for n in (pool or [a for a in project.agents if a != orchestrator] or [orchestrator]) if n in project.agents and n != app.PERSON]
     if not workers:
         raise app.ConfigError("choose at least one agent to do the work")
-    desc = [_describe(project.agents[n]) for n in workers]
+    amap = {k: str(v).strip() for k, v in (agent_models or {}).items() if isinstance(k, str) and isinstance(v, str) and str(v).strip()}
+    desc = [{**_describe(project.agents[n]), **({"model": amap[n]} if n in amap else {})} for n in workers]
     raw, note = None, ""
     try:
-        text = ask(project, orchestrator, plan_prompt(goal, desc, skills.catalog(project.root), scouting.repo_map(project.root, goal)), factory)
+        text = ask(project, orchestrator, plan_prompt(goal, desc, skills.catalog(project.root), scouting.repo_map(project.root, goal)), factory, model=orchestrator_model)
         raw = parse_plan_json(text)
         if raw is None:
             note = f"{orchestrator} did not answer with a plan; this split is a proposal to edit"
@@ -457,7 +538,11 @@ def plan_orchestration(project: app.Project, goal: str, orchestrator: str, pool:
         raw = {"summary": "Proposal spread over the chosen agents.", "subtasks": fallback_plan(goal, workers), "source": "fallback", "note": note}
     else:
         raw["source"] = "orchestrator"
-    raw.update(goal=goal, orchestrator=orchestrator, scout=resolve_scout(project, scout, workers))
+    if amap and isinstance(raw.get("subtasks"), list):
+        for s in raw["subtasks"]:
+            if isinstance(s, dict) and not s.get("model") and s.get("agent") in amap:
+                s["model"] = amap[s["agent"]]
+    raw.update(goal=goal, orchestrator=orchestrator, orchestrator_model=orchestrator_model, scout=resolve_scout(project, scout, workers))
     plan = normalize_plan(raw, project, workers, strict=False)
     plan["source"], plan["note"] = raw["source"], note
     return plan
@@ -521,8 +606,9 @@ class OrchestrationRun:
     """One reviewed plan being carried out. It looks like the dashboard's other runs (`snapshot`, `cancel`, `execute`, `session_id`), so the
     console and the event stream treat it the same; `snapshot()["orchestration"]` holds each subagent's state."""
 
-    def __init__(self, project: app.Project, plan: dict, session_id: str | None = None, factory=None, max_workers: int = 4):
+    def __init__(self, project: app.Project, plan: dict, session_id: str | None = None, factory=None, max_workers: int = 4, cycle: bool = False):
         self.id = uuid.uuid4().hex
+        self.cycle = cycle   # True: each delivered edit goes through cross-review and the landing gate (see cycle.run_cycle)
         self.project, self.plan, self.session_id = project, plan, session_id
         self.factory, self.max_workers = factory, max_workers
         self.status, self.phase, self.error, self.answer = "queued", "queued", "", ""
@@ -530,6 +616,7 @@ class OrchestrationRun:
         self.subs = [{**s, "depends_on": list(s.get("depends_on") or []), "state": "queued", "task_id": None, "worktree": None, "started": None, "duration_ms": None, "result": "", "diff": "",
                       "error": "", "note": "", "brief": "", "scout_ms": None, "scout_cached": False} for s in plan["subtasks"]]
         self.target_kind, self.target, self.worktree, self.trusted = "orchestrate", plan["orchestrator"], None, set()
+        self.duration_ms: int | None = None
         self.on_change = None
         self._cancelled = False
         self._lock = threading.RLock()
@@ -548,25 +635,31 @@ class OrchestrationRun:
         return {"delivered": "completed", "failed": "failed", "cancelled": "denied"}.get(s["state"], "running")
 
     def snapshot(self) -> dict:
+        from . import providers
         with self._lock:
             now = time.monotonic()
             subs = []
             for s in self.subs:
                 d = {k: v for k, v in s.items() if k != "started"}
+                ag = self.project.agents.get(s["agent"])
+                if not d.get("model") and ag:
+                    d["model"] = providers.model_of(ag.command, ag.provider, ag.model, ag.system)
+                d["family"] = family(ag) if ag else None
                 d["result"], d["diff"] = s["result"][:6000], s["diff"][:8000]
                 d["elapsed_ms"] = s["duration_ms"] if s["duration_ms"] is not None else (round((now - s["started"]) * 1000) if s["started"] else 0)
                 subs.append(d)
             a = self.project.agents.get(self.plan["orchestrator"])
+            orch_mod = self.plan.get("orchestrator_model") or (providers.model_of(a.command, a.provider, a.model, a.system) if a else None)
             return {
-                "id": self.id, "status": self.status, "model": (a.model or a.system or a.name) if a else self.plan["orchestrator"],
+                "id": self.id, "status": self.status, "model": orch_mod or (a.name if a else self.plan["orchestrator"]),
                 "provider": "orchestrator", "target_kind": "orchestrate", "target": self.plan["orchestrator"], "task_id": self.parent_id,
                 "queue": self.plan["orchestrator"], "workspace": str(self.project.root),
                 "steps": [{"name": f"#{s['task_id'] or 0:02d} {s['agent']} · {s['title']}"[:90], "kind": "skill", "status": self._step_status(s),
                            "input": s["task"][:200], **({"duration_ms": s["duration_ms"]} if s["duration_ms"] is not None else {}),
                            **({"output": (s["result"] or s["error"])[:4000]} if s["result"] or s["error"] else {})} for s in self.subs],
-                "answer": self.answer, "error": self.error, "cancelled": self._cancelled,
-                "orchestration": {"goal": self.plan["goal"], "orchestrator": self.plan["orchestrator"], "summary": self.plan.get("summary", ""),
-                                  "phase": self.phase, "parent_id": self.parent_id, "subtasks": subs, "synthesis": self.answer},
+                "answer": self.answer, "error": self.error, "cancelled": self._cancelled, "duration_ms": self.duration_ms,
+                "orchestration": {"goal": self.plan["goal"], "orchestrator": self.plan["orchestrator"], "orchestrator_model": orch_mod,
+                                  "summary": self.plan.get("summary", ""), "phase": self.phase, "parent_id": self.parent_id, "subtasks": subs, "synthesis": self.answer},
             }
 
     def cancel(self) -> None:
@@ -609,7 +702,11 @@ class OrchestrationRun:
             agent = self.project.agents[s["agent"]]
             if s["mode"] == "isolated":
                 try:
-                    wt = worktrees.ensure(root, f"orch-{self.id[:8]}-{s['id']}")
+                    start = None
+                    if self.cycle:   # a change that will be merged onto what already landed starts from there
+                        from . import landed
+                        start = landed.rebase_point(root) or None
+                    wt = worktrees.ensure(root, f"orch-{self.id[:8]}-{s['id']}", start)
                     s["worktree"], key = {"key": wt["key"], "path": wt["path"], "branch": wt["branch"]}, wt["key"]
                 except Exception as e:
                     why = str(e)[:200] if isinstance(e, app.ConfigError) else type(e).__name__
@@ -669,6 +766,16 @@ class OrchestrationRun:
                 s["note"] = " · ".join(n for n in (s["note"], f"{name} could not read ahead ({why}); it ran without a brief") if n)
             return d
         self._set(s, brief=r["brief"], scout_ms=r["ms"], scout_cached=r["cached"])
+        trace = self.project.board.trace
+        if trace:
+            try:
+                exec_agent = self.project.agents.get(s["agent"])
+                exec_tier = scouting.cost_tier(exec_agent) if exec_agent else ""
+                trace.event("ledger", "scout", "brief", name, "cached" if r["cached"] else "ok", s["id"],
+                            round((r["ms"] or 0) / 1000, 2), subtask=s["id"], executor=s["agent"],
+                            executor_tier=exec_tier, chars=r["chars"], cached=bool(r["cached"]))
+            except Exception:
+                pass
         return _WithUpstream(d, scouting.brief_block(r["brief"], name))
 
     def _run_sub(self, s: dict) -> None:
@@ -680,7 +787,10 @@ class OrchestrationRun:
             agent, b = s["agent"], self.project.board
             up_cwd, extra = self._upstream(s)
             cwd = Path(s["worktree"]["path"]) if s["worktree"] else up_cwd
-            override = {agent: readonly_agent(self.project.agents[agent])} if s["mode"] == "readonly" else None
+            ag_obj = with_agent_model(self.project.agents[agent], s.get("model"))
+            if s["mode"] == "readonly":
+                ag_obj = readonly_agent(ag_obj)
+            override = {agent: ag_obj} if ag_obj != self.project.agents[agent] else None
             d = self._dispatcher(cwd, override)
             if extra:
                 d = _WithUpstream(d, extra)
@@ -696,7 +806,14 @@ class OrchestrationRun:
                         diff = worktrees.workspace_diff(Path(s["worktree"]["path"]), max_bytes=12_000).get("diff") or ""
                     except Exception:
                         diff = ""
-                self._set(s, state="delivered", result=out, diff=diff, duration_ms=took())
+                cy = None
+                if self.cycle and s["worktree"] and not self._cancelled:
+                    from . import cycle as cycling
+                    try:   # the cycle never turns a delivery into a failure: whatever it cannot decide stays with the reviewer
+                        cy = cycling.run_cycle(self.project, s["worktree"]["key"], agent, factory=self._dispatcher)
+                    except Exception as e:
+                        cy = {"status": "error", "reason": f"{type(e).__name__}: {str(e)[:200]}"}
+                self._set(s, state="delivered", result=out, diff=diff, duration_ms=took(), **({"cycle": cy} if cy is not None else {}))
             elif self._cancelled:   # its command was terminated: the board put the task back in its queue, nothing was delivered
                 self._set(s, state="cancelled", error="stopped while it was running: its process was terminated", duration_ms=took())
             else:
@@ -749,6 +866,7 @@ class OrchestrationRun:
                     running.pop(f)
 
     def execute(self) -> None:
+        t0 = time.monotonic()
         with self._lock:
             if self._cancelled:
                 return
@@ -756,6 +874,9 @@ class OrchestrationRun:
             self._changed()
         try:
             self._create_tasks()
+            if self._cancelled:
+                self._finish_stopped()
+                return
             self._run_all()
             if self._cancelled:
                 self._finish_stopped()
@@ -770,6 +891,8 @@ class OrchestrationRun:
                 self.status = "finishing"
                 self._changed()
         finally:
+            with self._lock:
+                self.duration_ms = round((time.monotonic() - t0) * 1000)
             if self.parent_id is not None:
                 self.project._reserved.discard(self.parent_id)
             for s in self.subs:
@@ -792,7 +915,7 @@ class OrchestrationRun:
         text = ""
         if delivered:
             try:
-                text = ask(self.project, self.plan["orchestrator"], synthesis_prompt(self.plan, subs), self._dispatcher).strip()
+                text = ask(self.project, self.plan["orchestrator"], synthesis_prompt(self.plan, subs), self._dispatcher, model=self.plan.get("orchestrator_model")).strip()
             except DispatchTimeout:
                 why = "the orchestrator did not answer in time"
             except Exception as e:
@@ -811,3 +934,56 @@ class OrchestrationRun:
                 self.error = "no subagent delivered"
             self.status = "finishing"
             self._changed()
+
+
+# ── Landing: orchestrate → worktree → verify → landed ───────────────────────────────────────────────────────
+
+def landing_config(project: app.Project) -> dict:
+    """`[landing]` of harness.toml: `verify` (one argv list, no shell) and `timeout` in seconds."""
+    import tomllib
+    try:
+        raw = tomllib.loads((project.root / app.CONFIG).read_text(encoding="utf-8")).get("landing") or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        raw = {}
+    verify = raw.get("verify")
+    if verify is not None and not (isinstance(verify, list) and verify and all(isinstance(x, str) and x for x in verify)):
+        raise app.ConfigError("landing.verify must be a non-empty list of strings, like [\"make\", \"test\"]")
+    timeout = raw.get("timeout", 900)
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
+        raise app.ConfigError("landing.timeout must be a positive number of seconds")
+    autonomous = raw.get("autonomous", False)
+    if not isinstance(autonomous, bool):
+        raise app.ConfigError("landing.autonomous must be true or false")
+    verifier = raw.get("verifier")
+    if verifier is not None and verifier not in project.agents:
+        raise app.ConfigError(f"landing.verifier names an unknown agent: {verifier}")
+    target = raw.get("target", "branch")
+    if target not in ("branch", "folder"):
+        raise app.ConfigError('landing.target must be "branch" (verified work goes to harness/landed) or "folder" (applied to the project folder, uncommitted)')
+    return {"verify": verify, "timeout": float(timeout), "autonomous": autonomous, "verifier": verifier, "target": target}
+
+
+def land(project: app.Project, key: str, verify: list[str] | None = None, unreviewed: bool = False) -> dict:
+    """The gate between an isolated worktree and the project folder (see `worktrees.land`), with the two rules the board adds:
+    a worktree that belongs to board tasks lands only after a human accepted them (`ok`), and every attempt is traced.
+    `unreviewed=True` skips the first rule for a worktree the operator drove by hand; it never skips the verify command."""
+    cfg = landing_config(project)
+    verify = verify or cfg["verify"]
+    if not verify:
+        raise app.ConfigError("no verify command: set [landing] verify in harness.toml or pass one")
+    clean = worktrees._safe_key(key)
+    tasks = [r for r in project.board.rows() if r["worktree_key"] == clean]
+    open_ = [r["id"] for r in tasks if r["review"] != "ok"]
+    if open_ and not unreviewed:
+        out = {"key": clean, "status": "refused", "files": [], "verify": None, "tree": None,
+               "reason": f"task(s) {', '.join('#' + str(i) for i in open_)} of this worktree have no `ok` verdict yet: review first"}
+    else:
+        out = worktrees.land(project.root, clean, verify, cfg["timeout"])
+    out["tasks"] = [r["id"] for r in tasks]
+    trace = project.board.trace
+    if trace:
+        v = out.get("verify") or {}
+        for run in [f"task:{i}" for i in out["tasks"]] or [f"worktree:{clean}"]:
+            trace.event(run, "landing", "gate", clean, out["status"], out["reason"][:300], v.get("seconds"),
+                        files=len(out["files"]), verify_exit=v.get("exit"), tree=out.get("tree"))
+    return out

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, CloudUpload, Copy, FileArchive, ShieldCheck } from '../icons'
+import { Check, CloudUpload, Copy, FileArchive, FolderGit2, ShieldCheck } from '../icons'
 import { api, SharePackResponse, SharePreview, ShareDoctorResponse, ShareExportsResponse } from '../api'
 
 type Fmt = 'zip' | 'tar.gz' | 'dir'
@@ -72,7 +72,7 @@ export const ShareView: React.FC = () => {
     <div className="page">
       <div className="page-inner share-page">
         <div className="page-bar"><h1>Share / Team</h1>
-          <div className="page-bar-right"><button type="button" className="btn btn-sm" onClick={() => void runDoctor()} disabled={busy === 'doctor'}><ShieldCheck className="icon" style={{ width: 14, height: 14 }} />{busy === 'doctor' ? 'Escaneando…' : 'Ejecutar Doctor'}</button></div></div>
+          <div className="page-bar-right"><button type="button" className="btn btn-sm" onClick={() => void runDoctor()} disabled={busy === 'doctor'}><ShieldCheck className="icon icon-sm" />{busy === 'doctor' ? 'Escaneando…' : 'Ejecutar Doctor'}</button></div></div>
         {err && <div className="banner err" role="alert"><span>{err}</span></div>}
 
         <div className="share-split">
@@ -85,6 +85,11 @@ export const ShareView: React.FC = () => {
                   {doctor.issues.length > 0 && <ul className="issue-list">{doctor.issues.slice(0, 6).map((i, k) => <li key={k}><span className="chip coral-chip">{i.kind}</span><span className="mono">{i.path}{i.line ? `:${i.line}` : ''}</span></li>)}</ul>}
                 </>
               )}
+              {preview?.sanitization && preview.sanitization.length > 0 && (
+                <ul className="checklist" aria-label="Checklist de sanitización">
+                  {preview.sanitization.map((c) => <li key={c.id} className={c.ok ? 'ok' : 'note'}><span aria-hidden="true">{c.ok ? '✓' : '▲'}</span>{c.label}</li>)}
+                </ul>
+              )}
             </section>
 
             <section className="card share-card" aria-label="Share Pack">
@@ -95,12 +100,12 @@ export const ShareView: React.FC = () => {
                 <label><input type="checkbox" checked={docs} onChange={(e) => setDocs(e.target.checked)} />Docs</label>
                 <label><input type="checkbox" checked={skills} onChange={(e) => setSkills(e.target.checked)} />Skills equipo</label>
               </div>
-              <button type="button" className="btn btn-primary" onClick={() => void build()} disabled={busy === 'pack'}><FileArchive className="icon" style={{ width: 15, height: 15 }} />{busy === 'pack' ? 'Generando…' : 'Generar Share Pack'}</button>
+              <button type="button" className="btn btn-primary" onClick={() => void build()} disabled={busy === 'pack'}><FileArchive className="icon" />{busy === 'pack' ? 'Generando…' : 'Generar Share Pack'}</button>
               {pack && (
                 <div className="pack-result">
                   <b className="mono">{pack.filename}</b>
-                  <span className="mono muted">{pack.files_count} archivos · {kib(pack.size_bytes)} · {pack.format}</span>
-                  <span className={pack.verified === false ? 'coral' : 'sage'}>{pack.verified === false ? 'El escaneo final encontró algo: revisa' : <><Check className="icon" style={{ width: 12, height: 12 }} /> escaneo final limpio</>}</span>
+                  <span className="mono muted">{`${pack.files_count} archivos · ${kib(pack.size_bytes)} · ${pack.format}`}</span>
+                  <span className={pack.verified === false ? 'coral' : 'sage'}>{pack.verified === false ? 'El escaneo final encontró algo: revisa' : <><Check className="icon icon-xs" /> escaneo final limpio</>}</span>
                 </div>
               )}
             </section>
@@ -108,7 +113,7 @@ export const ShareView: React.FC = () => {
             <section className="card share-card" aria-label="Google Drive y exportaciones">
               <div className="card-head"><h2>3. Drive y exportaciones</h2><span className={`chip ${drive ? 'sage-chip' : 'dim'}`}>{drive ? 'gdrive conectado' : 'sin gdrive'}</span></div>
               <div className="drive-row"><input className="field field-sm" value={parentId} onChange={(e) => setParentId(e.target.value)} placeholder="Folder ID en Drive (opcional)" aria-label="Folder ID" />
-                <button type="button" className="btn btn-sm" disabled={!pack?.relative_path || busy === 'upload'} onClick={() => void upload()}><CloudUpload className="icon" style={{ width: 14, height: 14 }} />{busy === 'upload' ? 'Subiendo…' : 'Subir a Drive'}</button></div>
+                <button type="button" className="btn btn-sm" disabled={!pack?.relative_path || busy === 'upload'} onClick={() => void upload()}><CloudUpload className="icon icon-sm" />{busy === 'upload' ? 'Subiendo…' : 'Subir a Drive'}</button></div>
               {uploadRes && <div className={`status-banner ${uploadRes.ok ? 'sage' : 'amber'}`}><span>{uploadRes.text}</span>{uploadRes.url && <a href={uploadRes.url} target="_blank" rel="noreferrer">Abrir</a>}</div>}
               <div className="exports-list">
                 {exportsList.slice(0, 4).map((ex) => (
@@ -123,24 +128,22 @@ export const ShareView: React.FC = () => {
 
           <div className="share-col">
             <section className="card share-card preview-card" aria-label="Vista previa del paquete">
-              <div className="card-head"><h2>Vista previa real</h2>{preview && <span className="mono muted">{preview.files_count} archivos · {kib(preview.total_bytes)} · nada se escribe</span>}</div>
+              <div className="card-head"><h2>Vista previa real</h2>{preview && <span className="mono muted">{`${preview.files_count} archivos · ${kib(preview.total_bytes)} · nada se escribe`}</span>}</div>
               {pErr && <p className="verdict-err" role="alert">{pErr}</p>}
               {!preview && !pErr && <p className="muted mono">Calculando lo que entraría…</p>}
               {preview && (
                 <div className="preview-body">
-                  <h3 className="prov-sub">Incluidos ({preview.included.length})</h3>
+                  <h3 className="prov-sub">{`Incluidos (${preview.included.length})`}</h3>
                   <div className="tree">{tree.map((g) => (
-                    <details key={g.dir} className="tree-dir" open={tree.length <= 3}><summary><b className="mono">{g.dir}</b><span className="chip">{g.items.length}</span></summary>
-                      <ul>{g.items.slice(0, 30).map((it) => <li key={it.path}><span className="mono">{it.path}</span><span className="mono muted">{kib(it.size)}</span>{it.redacted_lines > 0 && <span className="chip amber-chip">{it.redacted_lines} línea(s) redactada(s)</span>}{it.sanitized && <span className="chip steel-chip">sanitizado</span>}</li>)}{g.items.length > 30 && <li className="muted mono">… y {g.items.length - 30} más</li>}</ul></details>
+                    <details key={g.dir} className="tree-dir" open={tree.length <= 3}><summary><FolderGit2 className="icon icon-sm champagne" aria-hidden="true" /><b className="mono">{g.dir}</b><span className="chip">{g.items.length}</span></summary>
+                      <ul>{g.items.slice(0, 30).map((it) => <li key={it.path}><span className="mono">{it.path}</span><span className="mono muted">{kib(it.size)}</span>{it.redacted_lines > 0 && <span className="chip amber-chip">{`${it.redacted_lines} línea(s) redactada(s)`}</span>}{it.sanitized && <span className="chip steel-chip">sanitizado</span>}</li>)}{g.items.length > 30 && <li className="muted mono">{`… y ${g.items.length - 30} más`}</li>}</ul></details>
                   ))}</div>
-                  <h3 className="prov-sub">Generados ({gen.length})</h3>
-                  <ul className="tree-flat">{gen.slice(0, 8).map((g) => <li key={g.path}><span className="mono">{g.path}</span><span className="mono muted">{kib(g.size)}</span></li>)}{gen.length > 8 && <li className="muted mono">… y {gen.length - 8} skills más</li>}</ul>
-                  <h3 className="prov-sub">Excluidos ({excluded.length})</h3>
+                  <h3 className="prov-sub">{`Generados (${gen.length})`}</h3>
+                  <ul className="tree-flat">{gen.slice(0, 8).map((g) => <li key={g.path}><span className="mono">{g.path}</span><span className="mono muted">{kib(g.size)}</span></li>)}{gen.length > 8 && <li className="muted mono">{`… y ${gen.length - 8} skills más`}</li>}</ul>
+                  <h3 className="prov-sub">{`Excluidos (${excluded.length})`}</h3>
                   {excluded.length === 0 ? <p className="muted mono">Nada excluido.</p> : <ul className="tree-flat">{excluded.slice(0, 10).map((e) => <li key={e.path}><span className="mono">{e.path}</span><span className="chip coral-chip">{e.reason}</span></li>)}</ul>}
-                  <h3 className="prov-sub">Rutas privadas redactadas ({preview.redacted_paths.length})</h3>
+                  <h3 className="prov-sub">{`Rutas privadas redactadas (${preview.redacted_paths.length})`}</h3>
                   {preview.redacted_paths.length === 0 ? <p className="muted mono">Ninguna ruta privada que reescribir.</p> : <ul className="tree-flat">{preview.redactions.slice(0, 8).map((r) => <li key={r.path}><span className="mono">{r.path}</span><span className="mono muted">líneas {r.lines.slice(0, 6).join(', ')}</span></li>)}</ul>}
-                  <h3 className="prov-sub">Checklist de sanitización</h3>
-                  <ul className="checklist">{preview.sanitization.map((c) => <li key={c.id} className={c.ok ? 'ok' : 'note'}><span aria-hidden="true">{c.ok ? '✓' : '▲'}</span>{c.label}</li>)}</ul>
                 </div>
               )}
             </section>
@@ -148,7 +151,7 @@ export const ShareView: React.FC = () => {
             <section className="card share-card" aria-label="Onboarding de equipo">
               <div className="card-head"><h2>Onboarding rápido de equipo</h2><span className="mono muted">lo que tu compañero ejecuta</span></div>
               <ol className="onboard">{(preview?.onboarding ?? ['pip install -e .', 'cp .env.example .harness/.env.local', 'caos-harness doctor --dry-run', 'caos-harness']).map((cmd) => (
-                <li key={cmd}><code>{cmd}</code><button type="button" className="btn btn-quiet btn-xs" onClick={() => copy(cmd)} aria-label={`Copiar ${cmd}`}>{copied === cmd ? <Check className="icon" style={{ width: 12, height: 12 }} /> : <Copy className="icon" style={{ width: 12, height: 12 }} />}{copied === cmd ? 'Copiado' : 'Copiar'}</button></li>
+                <li key={cmd}><code>{cmd}</code><button type="button" className="btn btn-quiet btn-xs" onClick={() => copy(cmd)} aria-label={`Copiar ${cmd}`}>{copied === cmd ? <Check className="icon icon-xs" /> : <Copy className="icon icon-xs" />}{copied === cmd ? 'Copiado' : 'Copiar'}</button></li>
               ))}</ol>
             </section>
           </div>

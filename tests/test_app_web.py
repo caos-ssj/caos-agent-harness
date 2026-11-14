@@ -292,3 +292,144 @@ def test_workspace_status_marks_non_git_folder_explicitly(project, monkeypatch):
     st = Api(project).workspace_status()
     assert st["git_repo"] is False and st["branch"] is None and st["dirty_files"] == []
     assert all("provider" in a and "model" in a for a in Api(project).state()["agents"])
+
+
+def test_a_return_carries_several_inline_notes_within_the_limits(project, http):
+    from caos_harness.web import server
+    api = Api(project)
+    t = api.add({"text": "summarise", "queue": "upper"})["id"]
+    api.run(wait=True)
+    with pytest.raises(app.ConfigError, match="too long"):
+        api.review(t, {"verdict": "redo", "note": "x" * (server.MAX_NOTE + 1)})
+    with pytest.raises(app.ConfigError, match="too many notes"):
+        api.review(t, {"verdict": "redo", "note": "\n".join(f"note {i}" for i in range(server.MAX_NOTE_LINES + 1))})
+    with pytest.raises(app.ConfigError, match="must be text"):
+        api.review(t, {"verdict": "redo", "note": ["a"]})
+    with pytest.raises(app.ConfigError, match="needs a note"):
+        api.review(t, {"verdict": "redo", "note": " \n\t\n "})
+    assert api.task(t)["state"] == "to_review"                          # a refused note changes nothing
+    note = "  general remark \r\n“SUMMARISE” →  not\x07 a summary\n\n“x”"
+    assert api.review(t, {"verdict": "redo", "note": note}) == {"id": t, "verdict": "redo"}
+    row = api.task(t)
+    assert row["review_note"] == "general remark\n“SUMMARISE” → not a summary\n“x”" and row["status"] == "pending" and row["review"] == "redo"
+    # the same contract over HTTP: 409 with the reason for a note over the limit
+    t2 = api.add({"text": "again", "queue": "upper"})["id"]
+    app.run_task(project, t2)
+    code, out = http(f"/api/task/{t2}/review", {"verdict": "redo", "note": "y" * (server.MAX_NOTE + 1)}, {"X-Harness": "1"})
+    assert code == 409 and "too long" in out["error"]
+    assert http(f"/api/task/{t2}/review", {"verdict": "redo", "note": "“AGAIN” → lower case\n“x” → y"}, {"X-Harness": "1"})[0] == 200
+
+
+def test_run_now_sends_one_task_and_leaves_the_rest_pending(project, http):
+    api = Api(project)
+    a, b = api.add({"text": "first", "queue": "upper"})["id"], api.add({"text": "second", "queue": "upper"})["id"]
+    who = api.add({"text": "for a person", "queue": "person"})["id"]
+    assert api.run_task(b, wait=True) == {"started": True, "id": b}
+    assert api.task(b)["state"] == "to_review" and api.task(b)["result"] == "SECOND"
+    assert api.task(a)["state"] == "pending" and api.state()["running_tasks"] == [] and api.last_run[0]["id"] == b
+    with pytest.raises(app.ConfigError, match="already sent"):
+        api.run_task(b)
+    with pytest.raises(app.ConfigError, match="waits for a person"):
+        api.run_task(who)
+    h = {"X-Harness": "1"}
+    assert http("/api/task/999/run", {}, h)[0] == 404
+    assert http(f"/api/task/{b}/run", {}, h)[0] == 409 and http(f"/api/task/{who}/run", {}, h)[0] == 409
+    assert http(f"/api/task/{a}/run", {})[0] == 403                     # the same guard as every write
+    project._busy.add("upper")                                          # the agent is in the middle of something else
+    code, out = http(f"/api/task/{a}/run", {}, h)
+    assert code == 409 and "busy" in out["error"] and api.task(a)["state"] == "pending"
+    project._busy.clear()
+    assert http(f"/api/task/{a}/run", {}, h) == (202, {"started": True, "id": a})
+
+
+def test_reorder_endpoint_keeps_a_task_inside_its_queue(project, http):
+    api = Api(project)
+    a, b, c = (api.add({"text": f"t{i}", "queue": "upper"})["id"] for i in range(3))
+    other = api.add({"text": "elsewhere", "queue": "echo"})["id"]
+    h = {"X-Harness": "1"}
+    order = lambda: [t["id"] for t in sorted((t for t in api.state()["tasks"] if t["queue"] == "upper" and t["status"] == "pending"), key=lambda t: t["position"])]
+    assert order() == [a, b, c]
+    assert http(f"/api/task/{c}/reorder", {"before": a}, h) == (200, {"id": c, "before": a, "moved": True}) and order() == [c, a, b]
+    assert http(f"/api/task/{c}/reorder", {"before": None}, h)[1]["moved"] is True and order() == [a, b, c]
+    assert http(f"/api/task/{c}/reorder", {"before": None}, h)[1]["moved"] is False
+    assert http("/api/task/999/reorder", {"before": a}, h)[0] == 404
+    assert http(f"/api/task/{a}/reorder", {"before": other}, h)[0] == 409       # another queue
+    assert http(f"/api/task/{a}/reorder", {"before": "2"}, h)[0] == 409 and http(f"/api/task/{a}/reorder", {"before": True}, h)[0] == 409
+    app.run_task(project, a)
+    assert http(f"/api/task/{a}/reorder", {"before": b}, h)[0] == 409 and http(f"/api/task/{b}/reorder", {"before": a}, h)[0] == 409   # sent: fixed
+    assert [r["agent"] for r in app.run_pending(project, only="upper")] == ["upper", "upper"] and order() == []
+    api.add({"text": "x1", "queue": "upper"}), api.add({"text": "x2", "queue": "upper"})
+    x1, x2 = order()
+    api.reorder(x2, {"before": x1})
+    assert [r["id"] for r in app.run_pending(project, only="upper")] == [x2, x1]   # the run follows the new order
+
+
+def test_effort_is_translated_only_where_the_tool_documents_it(tmp_path):
+    from caos_harness import providers
+    assert providers.with_effort(["claude", "-p"], "high") == ["claude", "--effort", "high", "-p"]
+    assert providers.with_effort(["claude", "--model", "sonnet", "-p"], "low") == ["claude", "--effort", "low", "--model", "sonnet", "-p"]
+    assert providers.with_effort(["codex", "exec", "-m", "gpt-5", "-"], "medium") == ["codex", "exec", "-c", "model_reasoning_effort=medium", "-m", "gpt-5", "-"]
+    for cmd in (["opencode", "run", "-m", "opencode/x"], ["ollama", "run", "qwen2.5:7b"], ["cat"], ["agy", "-p", "{prompt}"], ["claude", "--effort", "max", "-p"]):
+        assert providers.with_effort(cmd, "high") == cmd and providers.effort_support(cmd)[0] is False and providers.effort_support(cmd)[1]
+    assert providers.with_effort(["claude", "-p"], None) == ["claude", "-p"] and providers.with_effort(["claude", "-p"], "extreme") == ["claude", "-p"]
+    assert providers.effort_support((), "anthropic")[0] is False
+    by_id = {c["id"]: c["effort"]["supported"] for c in providers.detect_clis()}
+    assert by_id == {"claude": True, "codex": True, "opencode": False, "agy": False}
+
+    app.init(tmp_path)
+    cfg = tmp_path / "harness.toml"
+    base = cfg.read_text()
+    cfg.write_text(base + '[agents.think]\ncommand = ["claude", "-p"]\neffort = "high"\n')
+    assert app.load(cfg).agents["think"].effort == "high" and app.load(cfg).agents["echo"].effort is None
+    cfg.write_text(base + '[agents.think]\ncommand = ["claude", "-p"]\neffort = "max"\n')
+    with pytest.raises(app.ConfigError, match="effort must be one of low, medium, high"):
+        app.load(cfg)
+    cfg.write_text(base + '[agents.local]\ncommand = ["ollama", "run", "x"]\neffort = "high"\n')
+    with pytest.raises(app.ConfigError, match="effort cannot be set: Ollama"):
+        app.load(cfg)
+
+
+def test_effort_per_agent_and_per_task_reaches_the_command_that_runs(tmp_path):
+    app.init(tmp_path)
+    cfg = tmp_path / "harness.toml"
+    cfg.write_text(cfg.read_text() + '[agents.think]\ncommand = ["claude", "-p"]\n# kept comment\n\n[agents.cx]\ncommand = ["codex", "exec", "-"]\n')
+    p = app.load(cfg)
+    api = Api(p)
+    seen = []
+
+    def runner(cmd, **kw):
+        seen.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, "done", "")
+
+    api.task_dispatcher = app.CommandDispatcher(p, runner=runner)
+    s = {a["name"]: a for a in api.state()["agents"]}
+    assert s["think"]["effort"] is None and s["think"]["effort_support"]["supported"] and not s["echo"]["effort_support"]["supported"]
+    # per agent: written into harness.toml, and nothing else in the file moves
+    assert api.set_agent_effort({"name": "think", "effort": "high"}) == {"name": "think", "effort": "high"}
+    text = cfg.read_text()
+    assert 'command = ["claude", "-p"]\neffort = "high"\n# kept comment' in text and app.load(cfg).agents["think"].effort == "high"
+    plain = api.add({"text": "plain", "queue": "think"})["id"]
+    api.run_task(plain, wait=True)
+    assert seen[-1] == ["claude", "--effort", "high", "-p"]
+    # per task: wins over the agent's for that task only
+    one = api.add({"text": "quick one", "queue": "think", "effort": "low"})["id"]
+    assert api.task(one)["effort"] == "low"
+    api.run_task(one, wait=True)
+    assert seen[-1] == ["claude", "--effort", "low", "-p"] and p.agents["think"].effort == "high"
+    cx = api.add({"text": "codex one", "queue": "cx", "effort": "medium"})["id"]
+    app.run_pending(p, dispatcher=api.task_dispatcher)
+    assert seen[-1] == ["codex", "exec", "-c", "model_reasoning_effort=medium", "-"] and api.task(cx)["state"] == "to_review"
+    # cleared again: the line leaves the file
+    assert api.set_agent_effort({"name": "think", "effort": ""}) == {"name": "think", "effort": None} and "effort" not in cfg.read_text()
+    # refused, with the reason, where the tool takes none: never stored as a setting that does nothing
+    with pytest.raises(app.ConfigError, match="echo cannot take an effort level"):
+        api.set_agent_effort({"name": "echo", "effort": "high"})
+    with pytest.raises(app.ConfigError, match="effort must be one of"):
+        api.set_agent_effort({"name": "think", "effort": "max"})
+    with pytest.raises(app.ConfigError, match="cannot take an effort level"):
+        api.add({"text": "x", "queue": "echo", "effort": "high"})
+    with pytest.raises(app.ConfigError, match="a person takes no effort"):
+        api.add({"text": "x", "queue": "person", "effort": "high"})
+    with pytest.raises(app.ConfigError, match="effort must be one of"):
+        api.add({"text": "x", "queue": "think", "effort": "max"})
+    assert cfg.read_text() == text.replace('effort = "high"\n', "")   # every refusal left the file as it was

@@ -30,7 +30,8 @@ COMMANDS = {
 WORK = {
     "tui": "the full-screen 5-tab interface (default interactive `caos-harness`) [--resume [id]]",
     "repl": "line-mode interactive session [--emblem]",
-    "init": "create harness.toml and .harness/ in this folder",
+    "init": "create harness.toml and .harness/ in this folder [--detect [--dry-run] [--json]]",
+    "detect": "scan this folder for stack, verify command and ready engines [--apply] [--json]",
     "doctor": "preflight: ready | warning | blocked, and what to do next [--dry-run] [--strict] [--json]; spends no tokens",
     "task": 'task add "<text>" (--queue <agent> | --tier <tier>) [--skill <name>] · task list [--all] [--json] [--watch] · task show <id> [--json]',
     "run": 'send pending tasks [--agent a] · or run "<text>" [--intent I [--profile P] | --provider P --model M | --agent a | --tier t] [--skill S] [--json]',
@@ -42,7 +43,9 @@ WORK = {
     "providers": "providers list|add|test|smoke|failover|ollama-hosts [--profile P] [--json]",
     "metrics": "metrics [--project|--global] [--md] [--json] [--watch]",
     "share": "share doctor|preview|pack|upload [--format zip|dir|tar.gz] [--dry-run] [--parent-id ID] [--json]",
-    "worktree": "worktree list|diff|discard [<key>] [--json]",
+    "cycle": 'cycle <worktree key> --author <agent> [--verifier <agent>] [--verify "cmd"] [--apply] [--redo] [--json]: cross-review, then the landing gate · cycle stats',
+    "radar": "radar pull --db <case store> [--queue <agent>] [--kind content|opportunity|code] [--dry-run] [--json]: verified outside signals become board tasks",
+    "worktree": "worktree list|diff|discard|land [<key>] [--verify \"cmd\"] [--unreviewed] [--json]",
     "serve": "local dashboard on http://127.0.0.1:8791 [--port N]",
     "completion": "completion bash|zsh: print a shell completion script",
 }
@@ -541,12 +544,69 @@ def _cmd_doctor(rest: list[str], project=None) -> int:
     return 1 if ("--strict" in rest and res["verdict"] == "warning") else 0
 
 
+# ─ cycle and radar ─
+
+def _work_cycle(rest: list[str], p) -> int:
+    import shlex
+    from . import cycle
+    as_json = "--json" in rest
+    pos = _pos(rest, ("--author", "--verifier", "--verify"))
+    if pos == ["stats"]:
+        rows = cycle.verifier_stats(p)
+        if as_json:
+            _dump(rows)
+        else:
+            for r in rows:
+                print(f"{r['verifier']}: {r['cycles']} cycle(s) · caught {r['caught']}/{r['failed']} failing changes {r['catch_rate_ci95'] or ''} · "
+                      f"{r['approved_passed']}/{r['approved']} approvals passed {r['approval_precision_ci95'] or ''}")
+            if not rows:
+                print("no cycle with a verify result recorded yet")
+        return 0
+    author = _flag(rest, "--author")
+    if len(pos) != 1 or not author:
+        raise ValueError('usage: cycle <worktree key> --author <agent> [--verifier <agent>] [--verify "cmd"] [--apply] [--redo] [--json] · cycle stats')
+    verify = _flag(rest, "--verify")
+    out = cycle.run_cycle(p, pos[0], author, _flag(rest, "--verifier"), shlex.split(verify) if verify else None,
+                          apply=True if "--apply" in rest else None, auto_redo="--redo" in rest)
+    if as_json:
+        _dump(out)
+    else:
+        print(f"{out['status']}: {out['reason']}")
+        print(out["note"])
+    return 0 if out["status"] in ("landed", "ready") else 1
+
+
+def _work_radar(rest: list[str], p) -> int:
+    from . import app, radar
+    as_json = "--json" in rest
+    pos = _pos(rest, ("--db", "--queue", "--kind", "--states", "--min-value", "--limit", "--skill"))
+    db, queue = _flag(rest, "--db"), _flag(rest, "--queue")
+    if pos != ["pull"] or not db:
+        raise ValueError("usage: radar pull --db <case store> [--queue <agent>] [--kind content|opportunity|code] [--states util] "
+                         "[--min-value N] [--limit N] [--skill S] [--dry-run] [--json]")
+    states = tuple(x for x in (_flag(rest, "--states") or "util").split(",") if x)
+    good, rejected = radar.read_cases(db, states=states, limit=int(_flag(rest, "--limit") or 50), min_value=float(_flag(rest, "--min-value") or 0))
+    dry = "--dry-run" in rest or not queue
+    if queue and queue not in p.agents and queue != app.PERSON:
+        raise app.ConfigError(f"unknown queue: {queue}")
+    added = [] if dry else radar.ingest(p, good, queue, _flag(rest, "--kind") or "content", _flag(rest, "--skill"))
+    out = {"signals": [{"id": s.id, "title": s.title, "value": s.value, "confidence": s.confidence, "sources": len(s.evidence)} for s in good],
+           "rejected": rejected, "added": added, "dry_run": dry}
+    if as_json:
+        _dump(out)
+    else:
+        for s in out["signals"]:
+            print(f"  {s['id']}  [{s['confidence'] or '?'} · {s['value']:.2f}]  {s['title']}")
+        print(f"{len(good)} usable signal(s), {len(rejected)} rejected for lacking a source" + (" · dry run: nothing added" if dry else f" · {len(added)} task(s) added to {queue}"))
+    return 0
+
+
 # ─ worktree ─
 
 def _work_worktree(rest: list[str], p) -> int:
     from . import style, term, worktrees
     as_json = "--json" in rest
-    pos = _pos(rest, ())
+    pos = _pos(rest, ("--verify",))
     sub = pos[0] if pos else "list"
     if sub == "list":
         rows = list(worktrees.active_worktrees(p.root).values())
@@ -571,7 +631,19 @@ def _work_worktree(rest: list[str], p) -> int:
         out = worktrees.discard(p.root, pos[1])
         _dump(out) if as_json else print(f"discarded worktree {pos[1]}")
         return 0
-    raise ValueError("usage: worktree list|diff [key]|discard <key>")
+    if sub == "land" and len(pos) >= 2:
+        import shlex
+        from . import orchestrator
+        verify = shlex.split(rest[rest.index("--verify") + 1]) if "--verify" in rest and rest.index("--verify") + 1 < len(rest) else None
+        out = orchestrator.land(p, pos[1], verify, unreviewed="--unreviewed" in rest)
+        if as_json:
+            _dump(out)
+        else:
+            print(f"{out['status']}: {out['reason']}")
+            if out.get("verify") and out["status"] != "landed":
+                print(out["verify"]["tail"])
+        return 0 if out["status"] == "landed" else 1
+    raise ValueError("usage: worktree list|diff [key]|discard <key>|land <key> [--verify \"cmd\"] [--unreviewed]")
 
 
 # ─ tasks and status ─
@@ -687,7 +759,34 @@ def work(cmd: str, rest: list[str], project=None) -> int:
     from . import app, style
     try:
         if cmd == "init":
-            print("created", app.init(Path.cwd()))
+            if not any(f in rest for f in ("--detect", "--dry-run", "--json")):
+                print("created", app.init(Path.cwd()))
+                return 0
+            from . import detect
+            use_ollama = "--no-ollama" not in rest
+            as_json = "--json" in rest
+            dry = "--dry-run" in rest
+            res = detect.scan(Path.cwd(), probe_local_ollama=use_ollama) if dry else detect.apply_init(Path.cwd(), probe_local_ollama=use_ollama)
+            if as_json:
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            elif dry:
+                print(f"dry-run · stack={res['stacks'] or ['generic']} · verify={res['verify']} · engines={[e['name'] for e in res['engines']]}")
+                print(res["toml"])
+            else:
+                print("created", res["created"])
+                print(f"detected stack={res['stacks'] or ['generic']} · verify={res['verify']} · engines={[e['name'] for e in res['engines']]}")
+            return 0
+        if cmd == "detect":
+            from . import detect
+            use_ollama = "--no-ollama" not in rest
+            as_json = "--json" in rest
+            apply_cfg = "--apply" in rest
+            res = detect.apply_init(Path.cwd(), probe_local_ollama=use_ollama, overwrite="--overwrite" in rest) if apply_cfg else detect.scan(Path.cwd(), probe_local_ollama=use_ollama)
+            if as_json:
+                print(json.dumps(res, ensure_ascii=False, indent=2))
+            else:
+                print(f"stack={res['stacks'] or ['generic']} · verify={res['verify']} · engines={[e['name'] for e in res['engines']]}")
+                print(res["created"] if apply_cfg else res["toml"])
             return 0
         if cmd == "doctor":
             return _cmd_doctor(rest, project)
@@ -717,6 +816,10 @@ def work(cmd: str, rest: list[str], project=None) -> int:
             return _work_share(rest, p)
         if cmd == "worktree":
             return _work_worktree(rest, p)
+        if cmd == "cycle":
+            return _work_cycle(rest, p)
+        if cmd == "radar":
+            return _work_radar(rest, p)
         if cmd == "task":
             sub, args = (rest[0], rest[1:]) if rest else ("list", [])
             as_json = "--json" in args

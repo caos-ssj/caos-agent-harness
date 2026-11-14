@@ -138,3 +138,53 @@ def test_a_pending_task_can_change_queue_but_a_claimed_one_cannot():
     assert ("requeue", "b", "from:a") in [(e["kind"], e["name"], e["reason"]) for e in b.trace.timeline(f"task:{t}")]
     b.conn.execute("UPDATE tasks SET status='sending' WHERE id=?", (t,))
     assert not b.requeue(t, "a") and b.get(t)["queue"] == "b"           # once sent, the claim stays
+
+
+def test_reorder_trades_places_inside_one_queue_and_only_for_unsent_tasks():
+    b, d = Board(), Disp()
+    a1, a2, a3 = (b.add(f"a task {i}", queue="a") for i in (1, 2, 3))
+    o1 = b.add("other queue", queue="o")
+    order = lambda q: [r["id"] for r in b.pending(q)]
+    assert order("a") == [a1, a2, a3]
+    assert b.reorder(a3, a1) and order("a") == [a3, a1, a2]            # before the first
+    assert b.reorder(a3, None) and order("a") == [a1, a2, a3]          # None: to the end of its queue
+    assert b.reorder(a1, a3) and order("a") == [a2, a1, a3]
+    assert not b.reorder(a1, a3)                                       # already there: nothing changes
+    assert not b.reorder(a1, a1) and not b.reorder(a1, o1) and not b.reorder(999, None)   # itself, another queue, unknown
+    assert order("o") == [o1] and [r["id"] for r in b.pending()][-1] == o1                # the other queue kept its place
+    late = b.add("added later", queue="a")
+    assert order("a") == [a2, a1, a3, late]                            # a new task still lands last
+    assert b.assign(a2, "a", d).ok
+    assert not b.reorder(a2, a1) and not b.reorder(a1, a2)             # a sent task is never moved, nor used as an anchor
+    assert order("a") == [a1, a3, late]
+
+
+def test_a_board_written_before_reordering_is_migrated_without_losing_its_order(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    c = sqlite3.connect(path)
+    c.executescript("CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created REAL NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
+                    "queue TEXT, skill TEXT, agent TEXT, sent_at REAL, result TEXT, review TEXT, review_note TEXT, reviewed_at REAL);"
+                    "CREATE TABLE transitions (t REAL, task_id INTEGER, frm TEXT, too TEXT, agent TEXT);"
+                    "INSERT INTO tasks (text, created, queue) VALUES ('first', 1, 'a'), ('second', 2, 'a');")
+    c.commit()
+    c.close()
+    b = Board(path)
+    assert {"position", "effort"} <= {r[1] for r in b.conn.execute("PRAGMA table_info(tasks)")}
+    assert [r["text"] for r in b.pending("a")] == ["first", "second"] and b.get(1)["position"] is None
+    assert b.reorder(2, 1) and [r["text"] for r in b.pending("a")] == ["second", "first"]
+    b.close()
+    again = Board(path)                                                # opening it twice adds nothing twice and keeps the new order
+    assert [r["text"] for r in again.pending("a")] == ["second", "first"]
+    again.close()
+
+
+def test_a_return_with_several_notes_reaches_the_agent_as_one_line():
+    b, d = Board(), Disp()
+    t = b.add("write the report", queue="a")
+    assert b.assign(t, "a", d).ok and b.deliver(t, "draft")
+    assert b.review(t, "redo", "“total 12” → the total is 14\n“TODO” → finish this part")
+    assert b.get(t)["review_note"].count("\n") == 1                    # stored a note per line
+    assert b.assign(t, "a", d).ok
+    sent = d.sent[-1][1]
+    assert "\n" not in sent and "“total 12” → the total is 14 | “TODO” → finish this part" in sent and sent.endswith("Original task: write the report")

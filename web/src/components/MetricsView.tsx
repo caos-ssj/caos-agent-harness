@@ -32,19 +32,39 @@ export const TrendChart: React.FC<{ series: MetricsSeries | null }> = ({ series 
   const [hover, setHover] = useState<number | null>(null)
   const ref = useRef<SVGSVGElement>(null)
   if (!series) return <p className="muted mono">Leyendo la telemetría…</p>
+  const W = 640, H = 200, L = 36, R = 44, T = 12, B = 26
+  const ySucc = (v: number) => T + (1 - v) * (H - T - B)
   if (!series.enough) {
     return (
-      <div className="trend-empty" role="status">
-        <b>Aún no hay tendencia que mostrar</b>
-        <span>Hay {series.total_runs} run(s) registrados; la gráfica aparece desde {series.min_runs}. Ejecuta un prompt en Console o un Smoke Test.</span>
+      <div className="trend" role="status">
+        <svg viewBox={`0 0 ${W} ${H}`} className="trend-svg" role="img" aria-label="Calibración de tendencia">
+          {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+            <g key={g}>
+              <line x1={L} x2={W - R} y1={ySucc(g)} y2={ySucc(g)} className="trend-grid" />
+              <text x={L - 6} y={ySucc(g) + 3} textAnchor="end" className="trend-axis">{Math.round(g * 100)}%</text>
+            </g>
+          ))}
+          <line x1={L} x2={W - R} y1={ySucc(0.8)} y2={ySucc(0.8)} stroke="var(--pass)" strokeOpacity="0.35" strokeDasharray="4 4" />
+          <line x1={L} x2={W - R} y1={ySucc(0.5)} y2={ySucc(0.5)} stroke="var(--wait)" strokeOpacity="0.28" strokeDasharray="3 5" />
+          <rect x={L + 4} y={H / 2 - 22} width={W - L - R - 8} height={46} rx={6} fill="var(--bg-1)" fillOpacity="0.92" stroke="var(--edge)" />
+          <text x={(L + W - R) / 2} y={H / 2 - 3} textAnchor="middle" className="trend-axis" style={{ fill: 'var(--champan)' }}>
+            Aún no hay tendencia que mostrar
+          </text>
+          <text x={(L + W - R) / 2} y={H / 2 + 15} textAnchor="middle" className="trend-axis" style={{ fontSize: '9.5px', fill: 'var(--ink-3)' }}>
+            {`Hay ${series.total_runs} run(s) registrados; la gráfica aparece desde ${series.min_runs}. Ejecuta un prompt en Console o un Smoke Test.`}
+          </text>
+        </svg>
+        <div className="trend-legend">
+          <span><i className="sw pass" />objetivo éxito ≥ 80%</span>
+          <span><i className="sw steel" />referencia 50%</span>
+          <span className="muted mono trend-tip">{`${series.total_runs} / ${series.min_runs} runs mínimos`}</span>
+        </div>
       </div>
     )
   }
-  const W = 640, H = 200, L = 36, R = 44, T = 12, B = 26
   const pts = series.points
   const maxMs = Math.max(1, ...pts.map((p) => p.p50_ms ?? 0))
   const x = (i: number) => L + (pts.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (pts.length - 1))
-  const ySucc = (v: number) => T + (1 - v) * (H - T - B)
   const yMs = (v: number) => T + (1 - v / maxMs) * (H - T - B)
   const succLine = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${ySucc(p.success_rate).toFixed(1)}`).join(' ')
   const area = `${succLine} L${x(pts.length - 1).toFixed(1)} ${H - B} L${x(0).toFixed(1)} ${H - B} Z`
@@ -134,10 +154,10 @@ export const MetricsView: React.FC<Props> = ({ scope, profiles, tiers }) => {
   const k = data?.kpis
   const gates = gatesReading(k?.gates)
   const kpis: Array<{ label: string; value: string; sub: string; tone?: string }> = [
-    { label: 'Éxito de runs', value: pct(k?.run_success_rate), sub: `${k?.runs_total ?? 0} ejecutados`, tone: (k?.run_success_rate ?? 1) >= 0.8 ? 'pass' : 'act' },
-    { label: 'Retorno humano', value: pct(k?.human_redo_rate), sub: `${k?.returned ?? 0}/${k?.reviewed_total ?? 0} devueltas`, tone: (k?.human_redo_rate ?? 0) > 0 ? 'act' : '' },
+    { label: 'Éxito de runs', value: pct(k?.run_success_rate), sub: k ? `${k.runs_total} ejecutados` : '—', tone: k?.run_success_rate == null ? 'idle' : k.run_success_rate >= 0.8 ? 'pass' : k.run_success_rate >= 0.5 ? 'act' : 'fail' },
+    { label: 'Retorno humano', value: pct(k?.human_redo_rate), sub: k ? `${k.returned}/${k.reviewed_total} devueltas` : '—', tone: k?.human_redo_rate != null && k.human_redo_rate > 0 ? 'act' : 'idle' },
     { label: 'Latencia p50', value: k?.p50_latency_ms != null ? `${k.p50_latency_ms} ms` : '—', sub: 'mediana en caliente' },
-    { label: 'Tokens', value: (k?.tokens.total ?? 0).toLocaleString('en-US'), sub: `${k?.tokens.prompt ?? 0} in · ${k?.tokens.completion ?? 0} out` },
+    { label: 'Tokens', value: k?.tokens?.total != null ? k.tokens.total.toLocaleString('en-US') : '—', sub: k ? `${k.tokens.prompt} in · ${k.tokens.completion} out` : '—' },
     { label: 'Gates repo', value: gates.value, sub: gates.sub, tone: gates.tone },
   ]
 
@@ -149,50 +169,74 @@ export const MetricsView: React.FC<Props> = ({ scope, profiles, tiers }) => {
         <div className="page-bar">
           <h1>Metrics</h1>
           <div className="page-bar-right">
-            <span className="chip">{scope === 'global' ? 'Global · todos los proyectos' : 'Proyecto'}</span>
-            <button type="button" className="btn btn-sm" onClick={exportMarkdown} disabled={!data}><Download className="icon" style={{ width: 14, height: 14 }} />Exportar Markdown</button>
-            <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => void load()} title="Actualizar" aria-label="Actualizar métricas"><RefreshCw className="icon" style={{ width: 14, height: 14 }} /></button>
+            <span className="pill-mini">{scope === 'global' ? 'Global · todos los proyectos' : 'Proyecto'}</span>
+            <button type="button" className="btn btn-sm" onClick={exportMarkdown} disabled={!data}><Download className="icon icon-sm" />Exportar Markdown</button>
+            <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => void load()} title="Actualizar" aria-label="Actualizar métricas"><RefreshCw className="icon icon-sm" /></button>
           </div>
         </div>
         {note && <div className="toast-strip" role="status">{note}</div>}
         {err && <div className="banner err" role="alert"><span>{err}</span></div>}
 
-        <div className="kpi-grid-5">
+        <div className="kpi-grid-5" style={{ fontVariantNumeric: 'tabular-nums' }}>
           {kpis.map((c) => (
-            <div key={c.label} className="kpi-card"><span className="kpi-label">{c.label}</span><span className={`kpi-val ${c.tone ?? ''}`}>{c.value}</span><span className="kpi-sub" title={c.sub}>{c.sub}</span></div>
+            <div key={c.label} className="kpi-card">
+              <span className="kpi-label">{c.label}</span>
+              <span className={`kpi-val mono ${c.tone ?? ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{c.value}</span>
+              <span className="kpi-sub mono" style={{ fontVariantNumeric: 'tabular-nums' }} title={c.sub}>{c.sub}</span>
+            </div>
           ))}
         </div>
 
-        <div className="metrics-split">
+        {k?.scout && (
+          <div className="scout-kpi-strip" aria-label="Ahorro medido con scout" style={{ fontVariantNumeric: 'tabular-nums' }}>
+            <div className="kpi-card">
+              <span className="kpi-label">Lecturas previas (Scout)</span>
+              <span className="kpi-val mono" style={{ fontVariantNumeric: 'tabular-nums' }}>{k.scout.briefs ?? '—'}</span>
+              <span className="kpi-sub">briefs entregados antes de pago</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Caché de briefs</span>
+              <span className="kpi-val mono pass" style={{ fontVariantNumeric: 'tabular-nums' }}>{k.scout.cached ?? '—'}</span>
+              <span className="kpi-sub">reutilizados sin coste</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Llamadas de pago evitadas</span>
+              <span className="kpi-val mono pass" style={{ fontVariantNumeric: 'tabular-nums' }}>{k.scout.paid_avoided_calls ?? '—'}</span>
+              <span className="kpi-sub">resueltas en carril gratis o local</span>
+            </div>
+          </div>
+        )}
+
+        <div className="metrics-split" style={{ alignItems: 'stretch' }}>
           <section className="card chart-card" aria-label="Tendencia">
             <div className="card-head"><h2>Tendencia</h2>
               <div className="seg" role="group" aria-label="Agrupar por"><button type="button" aria-pressed={bucket === 'day'} onClick={() => { picked.current = true; setBucket('day') }}>Día</button><button type="button" aria-pressed={bucket === 'hour'} onClick={() => { picked.current = true; setBucket('hour') }}>Hora</button></div></div>
             <TrendChart series={series} />
           </section>
-          <section className="card tbl-card" aria-label="Matriz de tiers">
+          <section className="card chart-card tbl-card" aria-label="Matriz de tiers">
             <div className="card-head"><h2>Tier × Modelo</h2><span className="mono muted">límite inferior 95% ≥ exigido</span></div>
             {measured.length === 0 ? <p className="muted mono">Sin modelos medidos.</p> : (
-              <div className="tbl-scroll"><table className="tbl matrix"><thead><tr><th>Tier</th>{measured.slice(0, 3).map((p) => <th key={p.system} className="mono mx-head" title={p.system}>{p.system.replace(/^.*\//, '').replace('+rules', '+r')}</th>)}<th>Hoy responde</th></tr></thead>
+              <div className="tbl-scroll"><table className="tbl matrix" style={{ fontVariantNumeric: 'tabular-nums' }}><thead><tr><th>Tier</th>{measured.slice(0, 3).map((p) => <th key={p.system} className="mono mx-head" title={p.system}>{p.system.replace(/^.*\//, '').replace('+rules', '+r')}</th>)}<th>Hoy responde</th></tr></thead>
                 <tbody>{tiers.map((t) => (
                   <tr key={t.tier}><td><b>{t.tier}</b> <span className="muted mono">≥{t.needs}</span></td>
-                    {measured.slice(0, 3).map((p) => { const cov = p.precision_lo >= t.needs; const chosen = t.system === p.system; return <td key={p.system} className={`mx ${cov ? 'cov' : ''} ${chosen ? 'chosen' : ''}`} title={`${p.system}: límite ${pct(p.precision_lo, 1)}`}>{chosen ? '★' : cov ? '✓' : '—'}</td> })}
-                    <td className="mono">{t.action === 'route' ? t.system : <span className="amber">persona</span>}</td></tr>))}</tbody></table></div>
+                    {measured.slice(0, 3).map((p) => { const cov = p.precision_lo >= t.needs; const chosen = t.system === p.system; return <td key={p.system} className={`mx mono ${cov ? 'cov' : ''} ${chosen ? 'chosen' : ''}`} title={`${p.system}: límite ${pct(p.precision_lo, 1)}`}>{chosen ? `★ ${pct(p.precision_lo, 0)}` : cov ? `✓ ${pct(p.precision_lo, 0)}` : '—'}</td> })}
+                    <td className="mono">{t.action === 'route' ? t.system : <span className="pill-mini amber">persona</span>}</td></tr>))}</tbody></table></div>
             )}
           </section>
         </div>
 
         <section className="card tbl-card" aria-label="Rendimiento por modelo">
-          <div className="card-head"><h2>Rendimiento operativo por modelo ({data?.models.length ?? 0})</h2><span className="mono muted">alcance: {scope}</span></div>
-          <div className="tbl-scroll"><table className="tbl"><thead><tr><th>Modelo</th><th className="num">Runs</th><th className="num">Éxito</th><th className="num">p50</th><th className="num">Errores</th><th>Smoke</th><th className="actions-col">Acciones</th></tr></thead>
+          <div className="card-head"><h2>{`Rendimiento operativo por modelo (${data?.models.length ?? 0})`}</h2><span className="mono muted">{`alcance: ${scope}`}</span></div>
+          <div className="tbl-scroll"><table className="tbl" style={{ fontVariantNumeric: 'tabular-nums' }}><thead><tr><th>Modelo</th><th className="num">Runs</th><th className="num">Éxito</th><th className="num">p50</th><th className="num">Errores</th><th>Smoke</th><th className="actions-col">Acciones</th></tr></thead>
             <tbody>
               {(data?.models ?? []).map((m) => (
                 <tr key={`${m.provider}:${m.model}`} className={m.demoted ? 'is-demoted' : ''}>
-                  <td><b className="mono">{m.model}</b> <span className="muted mono">{m.provider}</span>{m.demoted && <span className="chip coral-chip"> degradado</span>}</td>
-                  <td className="num mono">{m.runs}</td><td className="num mono">{pct(m.success_rate)}</td><td className="num mono">{m.p50_ms} ms</td><td className="num mono">{m.errors}</td>
+                  <td><b className="mono">{m.model}</b> <span className="muted mono">{m.provider}</span>{m.demoted && <span className="pill-mini coral"> degradado</span>}</td>
+                  <td className="num mono">{m.runs}</td><td className="num mono">{pct(m.success_rate)}</td><td className="num mono">{m.p50_ms != null ? `${m.p50_ms} ms` : '—'}</td><td className="num mono">{m.errors}</td>
                   <td>{m.last_smoke ? <span className={`pill-mini ${m.last_smoke.ok ? 'sage' : 'coral'}`}>{m.last_smoke.ok ? `OK · ${m.last_smoke.ms} ms` : 'falló'}</span> : <span className="muted mono">—</span>}</td>
                   <td className="actions-col">
-                    <button type="button" className="btn btn-xs" disabled={busyKey === `smoke:${m.provider}:${m.model}`} onClick={() => void smoke(m.provider, m.model)}>Smoke</button>
-                    <button type="button" className="btn btn-xs" disabled={busyKey === `demote:${m.provider}:${m.model}`} onClick={() => void toggleDemote(m.provider, m.model, m.demoted)}>{m.demoted ? 'Restaurar' : 'Degradar'}</button>
+                    <button type="button" className="btn btn-quiet btn-xs" disabled={busyKey === `smoke:${m.provider}:${m.model}`} onClick={() => void smoke(m.provider, m.model)}>Smoke</button>
+                    <button type="button" className="btn btn-quiet btn-xs" disabled={busyKey === `demote:${m.provider}:${m.model}`} onClick={() => void toggleDemote(m.provider, m.model, m.demoted)}>{m.demoted ? 'Restaurar' : 'Degradar'}</button>
                   </td>
                 </tr>
               ))}
@@ -202,7 +246,7 @@ export const MetricsView: React.FC<Props> = ({ scope, profiles, tiers }) => {
 
         {!!data?.compare?.runs && (
           <section className="card tbl-card" aria-label="Comparaciones">
-            <div className="card-head"><h2><GitCompareArrows className="icon" style={{ width: 16, height: 16 }} />Comparaciones lado a lado ({data.compare.runs})</h2><span className="mono muted">no cuentan en los KPIs de trabajo real</span></div>
+            <div className="card-head"><h2><GitCompareArrows className="icon" />Comparaciones lado a lado ({data.compare.runs})</h2><span className="mono muted">no cuentan en los KPIs de trabajo real</span></div>
             <div className="tiers-compact">{data.compare.models.map((m) => <span key={`${m.provider}:${m.model}`} className="tier-mini"><b>{m.model}</b><span className="mono muted">{m.provider} · {m.runs} corridas · {pct(m.ok_rate)} ok · p50 {m.p50_ms ?? '—'} ms</span></span>)}</div>
           </section>
         )}

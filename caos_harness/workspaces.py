@@ -63,7 +63,7 @@ def register(raw, initialize: bool = False) -> Path:
     if not cfg.is_file():
         if not initialize:
             raise app.ConfigError(f"{p} has no {app.CONFIG}. Run `caos-harness init` there, or add it with 'create the project file' turned on.")
-        app.init(p)
+        app.init(p, smart=True)
     app.load(cfg)   # a harness.toml that does not parse is refused here, not later
     paths = registered()
     if str(p) not in paths:

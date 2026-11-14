@@ -296,13 +296,14 @@ def get(repo_root: Path, key: str) -> dict | None:
     return None
 
 
-def ensure(repo_root: Path, key: str) -> dict:
+def ensure(repo_root: Path, key: str, start: str | None = None) -> dict:
     with _META_LOCK:
-        return _ensure(repo_root, key)
+        return _ensure(repo_root, key, start)
 
 
-def _ensure(repo_root: Path, key: str) -> dict:
-    """Creates or reuses an isolated git worktree at `.harness/worktrees/<key>` incrementally."""
+def _ensure(repo_root: Path, key: str, start: str | None = None) -> dict:
+    """Creates or reuses an isolated git worktree at `.harness/worktrees/<key>` incrementally. A new one is cut from `start`
+    (a commit) when given, otherwise from HEAD."""
     repo_root = repo_root.resolve()
     clean = _safe_key(key)
     if not is_git_repo(repo_root):
@@ -319,7 +320,7 @@ def _ensure(repo_root: Path, key: str) -> dict:
     wt_path.parent.mkdir(parents=True, exist_ok=True)
     branch = f"caos/{clean}"
     pre_existing = subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=repo_root, timeout=2).returncode == 0
-    cmd = ["git", "worktree", "add", str(wt_path), branch] if pre_existing else ["git", "worktree", "add", "-b", branch, str(wt_path), "HEAD"]
+    cmd = ["git", "worktree", "add", str(wt_path), branch] if pre_existing else ["git", "worktree", "add", "-b", branch, str(wt_path), start or "HEAD"]
     res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, timeout=10)
     if res.returncode != 0:
         raise app.ConfigError(f"could not create worktree: {(res.stderr or res.stdout).strip()[:240]}")
@@ -353,6 +354,7 @@ def _discard(repo_root: Path, key: str) -> dict:
         raise app.ConfigError(f"no isolated worktree '{clean}'")
     wt_path = Path(entry["path"])
     if wt_path.exists():
+        unlock_eval_paths(wt_path)
         res = subprocess.run(["git", "worktree", "remove", "--force", str(wt_path)], cwd=repo_root, capture_output=True, text=True, timeout=10)
         if res.returncode != 0:
             raise app.ConfigError(f"could not remove worktree: {(res.stderr or res.stdout).strip()[:240]}")
@@ -444,3 +446,372 @@ def integrated_worktrees(repo_root: Path) -> list[str]:
         except app.ConfigError:
             continue
     return out
+
+
+# ── Landing gate: the only way a worktree's changes reach the project folder ─────────────────────────────────
+#
+#   worktree ──patch──▶ staging copy of the project as it is now ──verify command──▶ project folder
+#
+# What is verified is exactly what lands: the staging copy holds the project as it stands on disk (HEAD plus its
+# uncommitted and untracked work) with the patch on top, and after applying the patch to the project its tree id
+# must equal the one that was verified, or the patch is reversed. Nothing is committed, merged or pushed: the
+# change lands as uncommitted work, so the commit stays a human decision.
+
+LAND_STATUSES = ("landed", "verified", "empty", "refused", "conflict", "verify_failed", "drifted", "rolled_back")
+_TAIL = 2000
+_LAND_LOCK = threading.Lock()
+PROJECT_SLOT = "{project}"   # in a verify command: replaced by the project folder
+
+
+def _run(cmd: list[str], cwd: Path, timeout: float = 60, env: dict | None = None) -> tuple[int, str]:
+    """Runs one argv list (never a shell) in its own process group; returns (exit code, combined output). 124 on timeout."""
+    try:
+        p = subprocess.Popen(app.resolve_argv(cmd), cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, errors="replace", **app.popen_group_kwargs())
+    except OSError as e:
+        return 127, f"{type(e).__name__}: {e}"
+    try:
+        out, _ = p.communicate(timeout=timeout)
+        return p.returncode, out or ""
+    except subprocess.TimeoutExpired:
+        app.terminate_process_tree(p, grace=5)
+        try:
+            out, _ = p.communicate(timeout=2)
+        except Exception:
+            out = ""
+        return 124, (out or "") + f"\n[timed out after {timeout:g} s]"
+
+
+def snapshot_tree(root: Path) -> str:
+    """The git tree id of `root` as it stands on disk (HEAD + uncommitted + untracked, ignoring what .gitignore ignores and
+    `.harness/`), computed in a throwaway index: the real index, the branch and the files are not touched."""
+    fd, idx = tempfile.mkstemp(prefix="caos-land-", suffix=".idx")
+    os.close(fd)
+    os.unlink(idx)   # git wants to create the index file itself
+    env = {**os.environ, "GIT_INDEX_FILE": idx}
+    try:
+        # `.harness/` (boards, traces, other worktrees) is dropped from the throwaway index whether or not .gitignore lists it
+        for args in (["read-tree", "HEAD"], ["add", "-A", "--", "."], ["rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".harness"]):
+            rc, out = _run(["git", *args], root, env=env)
+            if rc != 0:
+                raise app.ConfigError(f"could not snapshot {root.name}: {out.strip()[:240]}")
+        rc, out = _run(["git", "write-tree"], root, env=env)
+        if rc != 0 or not out.strip():
+            raise app.ConfigError(f"could not snapshot {root.name}: {out.strip()[:240]}")
+        return out.strip().splitlines()[-1]
+    finally:
+        for f in (idx, idx + ".lock"):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+
+def _added_lines(patch: str) -> str:
+    return "\n".join(ln[1:] for ln in patch.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+
+
+PROTECTED_CONFIG_FILES = ("harness.toml", "thresholds.json", "pytest.ini")
+EVAL_PATH_PREFIXES = ("tests/", "test/", "evals/", "eval/", "benchmarks/")
+EVAL_FILE_NAMES = ("conftest.py",)
+_SKIP_INJECTION_RE = re.compile(
+    r"^\+.*(?:@pytest\.mark\.(?:skip|skipif|xfail)\b|pytest\.(?:skip|xfail)\s*\(|@unittest\.skip|unittest\.SkipTest)",
+    re.M,
+)
+_ASSERT_REMOVED_RE = re.compile(r"^-\s*assert\b", re.M)
+_ASSERT_ADDED_RE = re.compile(r"^\+\s*assert\b", re.M)
+
+
+def is_eval_path(rel_path: str) -> bool:
+    norm = rel_path.replace("\\", "/").lstrip("./")
+    base = norm.rsplit("/", 1)[-1]
+    return norm.startswith(EVAL_PATH_PREFIXES) or base in EVAL_FILE_NAMES or (base.startswith("test_") and base.endswith(".py"))
+
+
+def format_diagnostic(what: str, why: str, fix: str) -> str:
+    """Actionable 3-part error format (WHAT / WHY / FIX) for deterministic agent self-correction."""
+    return f"WHAT: {what} | WHY: {why} | FIX: {fix}"
+
+
+def lock_eval_paths(wt_path: Path) -> list[str]:
+    """Marks existing test/eval files and harness config inside `wt_path` read-only (0o444/0o555) so an isolated worker cannot tamper with them."""
+    wt_res = wt_path.resolve()
+    locked: list[str] = []
+    if not wt_res.is_dir():
+        return locked
+    dirs_to_lock: list[Path] = []
+    for p in sorted(wt_res.rglob("*")):
+        if p.is_symlink():
+            continue
+        rel_parts = p.relative_to(wt_res).parts
+        if any(part in SKIP_DIRS or part.startswith(".") for part in rel_parts):
+            continue
+        rel = Path(*rel_parts).as_posix()
+        if rel in PROTECTED_CONFIG_FILES or is_eval_path(rel):
+            if p.is_file():
+                try:
+                    os.chmod(p, 0o444)
+                    locked.append(rel)
+                except OSError:
+                    pass
+            elif p.is_dir():
+                dirs_to_lock.append(p)
+    for d in sorted(dirs_to_lock, key=lambda x: len(x.parts), reverse=True):
+        try:
+            os.chmod(d, 0o555)
+        except OSError:
+            pass
+    return locked
+
+
+def unlock_eval_paths(wt_path: Path) -> None:
+    """Restores write permissions on directories and files under `wt_path` that were locked by `lock_eval_paths`."""
+    wt_res = wt_path.resolve()
+    if not wt_res.is_dir():
+        return
+    for root_dir, dirs, files in os.walk(wt_res):
+        rp = Path(root_dir)
+        try:
+            mode = rp.stat().st_mode
+            if not (mode & 0o200):
+                os.chmod(rp, mode | 0o200)
+        except OSError:
+            pass
+        for name in files:
+            fp = rp / name
+            if fp.is_symlink():
+                continue
+            try:
+                mode = fp.stat().st_mode
+                if not (mode & 0o200):
+                    os.chmod(fp, mode | 0o200)
+            except OSError:
+                pass
+
+
+def _split_patch_by_file(patch: str) -> dict[str, str]:
+    per_file: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split(" b/", 1)
+            current = parts[1].strip() if len(parts) == 2 else None
+            if current:
+                per_file.setdefault(current, [])
+        if current is not None:
+            per_file[current].append(line)
+    return {k: "\n".join(v) for k, v in per_file.items()}
+
+
+def audit_reward_hacking(files: list[str], patch: str, protect_tests: bool = False) -> list[dict]:
+    """Audits a worktree diff before verification to block reward hacking:
+    1. Modifying harness/threshold config (`harness.toml`, `thresholds.json`, `pytest.ini`).
+    2. Modifying any protected eval/test file when `protect_tests=True`.
+    3. Injecting skip/xfail markers (`@pytest.mark.skip`, `pytest.skip(`, `@pytest.mark.xfail`) into test/eval files.
+    4. Deleting test files or weakening assertions (removing `assert` statements without replacing them).
+    Returns a list of structured diagnostic dicts (`code`, `file`, `what`, `why`, `fix`, `message`)."""
+    diagnostics: list[dict] = []
+    per_file = _split_patch_by_file(patch)
+
+    def add(code: str, file: str, what: str, why: str, fix: str) -> None:
+        diagnostics.append({
+            "code": code,
+            "file": file,
+            "what": what,
+            "why": why,
+            "fix": fix,
+            "message": format_diagnostic(what, why, fix),
+        })
+
+    for f in files:
+        norm = f.replace("\\", "/").lstrip("./")
+        if norm in PROTECTED_CONFIG_FILES:
+            add(
+                "harness_config_tampered",
+                norm,
+                f"Worktree modified protected configuration file '{norm}'",
+                "Agents must not alter the verification command, thresholds, or test runner config to pass the gate.",
+                f"Revert '{norm}' (`git checkout -- {norm}`) and make the implementation satisfy the existing configuration.",
+            )
+            continue
+        if not is_eval_path(norm):
+            continue
+        f_patch = per_file.get(norm, "")
+        if protect_tests:
+            add(
+                "protected_eval_modified",
+                norm,
+                f"Worktree modified read-only evaluation/test file '{norm}'",
+                "When `protect_tests` is enabled, the test suite is a fixed oracle and cannot be edited by the worker.",
+                f"Revert changes to '{norm}' (`git checkout -- {norm}`) and fix the production module under test instead.",
+            )
+            continue
+        if "\ndeleted file mode " in f_patch or f_patch.startswith("deleted file mode "):
+            add(
+                "test_file_deleted",
+                norm,
+                f"Worktree deleted existing test/evaluation file '{norm}'",
+                "Deleting tests to make the verification command pass is reward hacking.",
+                f"Restore '{norm}' (`git checkout HEAD -- {norm}`) and fix the failing code.",
+            )
+            continue
+        if _SKIP_INJECTION_RE.search(f_patch):
+            add(
+                "test_skip_injected",
+                norm,
+                f"Worktree injected skip/xfail marker in '{norm}'",
+                "Skipping or xfailing tests hides regressions instead of solving the task.",
+                f"Remove `@pytest.mark.skip` / `pytest.skip` / `xfail` from '{norm}' and make the test pass genuinely.",
+            )
+            continue
+        removed_asserts = len(_ASSERT_REMOVED_RE.findall(f_patch))
+        added_asserts = len(_ASSERT_ADDED_RE.findall(f_patch))
+        if removed_asserts > added_asserts:
+            add(
+                "assertions_weakened",
+                norm,
+                f"Worktree weakened assertions in '{norm}' (removed {removed_asserts}, added {added_asserts})",
+                "Removing assertions from existing tests lowers verification coverage to fake a green build.",
+                f"Keep the original assertions in '{norm}' (or replace them with at least as many assertions) and fix the code under test.",
+            )
+    return diagnostics
+
+
+def change(repo_root: Path, key: str, max_bytes: int = 48_000) -> dict:
+    """What worktree `key` would land, for a reviewer: {"files", "diff", "tree"}. The same change the gate applies (committed or not,
+    local include copies left out), with secret-looking files and hunks redacted. `tree` identifies the worktree's state."""
+    repo_root = repo_root.resolve()
+    entry = get(repo_root, key)
+    if not entry:
+        raise app.ConfigError(f"no isolated worktree '{_safe_key(key)}'")
+    rc, base = _git(repo_root, "merge-base", "HEAD", entry.get("branch") or "HEAD")
+    if rc != 0 or not base.strip():
+        raise app.ConfigError("the worktree shares no history with the project's HEAD")
+    tree = snapshot_tree(Path(entry["path"]))
+    skip = [f":(exclude,literal){f}" for f in entry.get("included_files") or []]
+    _, names = _git(repo_root, "diff", "--name-only", "-z", base.strip(), tree, "--", ".", *skip, timeout=30)
+    _, diff = _git(repo_root, "diff", "--no-color", base.strip(), tree, "--", ".", *skip, timeout=60)
+    diff = _redact_tracked_diff(diff)
+    if len(diff.encode("utf-8", errors="ignore")) > max_bytes:
+        diff = diff[:max_bytes] + "\n... [diff truncated]"
+    return {"files": [n for n in names.split("\0") if n], "diff": diff, "tree": tree}
+
+
+def land(repo_root: Path, key: str, verify: list[str], timeout: float = 900, dry_run: bool = False, protect_tests: bool = False) -> dict:
+    """Passes the changes of worktree `key` through the gate and, only if every step holds, applies them to the project folder.
+    With `dry_run` it stops after the verify command passed (status `verified`) and never writes to the project folder.
+
+    Returns {"status": one of LAND_STATUSES, "reason", "files", "verify": {"command", "exit", "seconds", "tail"}, "tree"}.
+    Any status other than `landed` leaves the project folder exactly as it was. The worktree itself is never modified.
+    """
+    with _LAND_LOCK:   # one landing at a time per process; the metadata lock is only taken to record the result
+        return _land(repo_root.resolve(), key, verify, timeout, dry_run, protect_tests)
+
+
+def _land(repo_root: Path, key: str, verify: list[str], timeout: float, dry_run: bool = False, protect_tests: bool = False) -> dict:
+    clean = _safe_key(key)
+    entry = get(repo_root, clean)
+    if not entry:
+        raise app.ConfigError(f"no isolated worktree '{clean}'")
+    if not (isinstance(verify, (list, tuple)) and verify and all(isinstance(x, str) and x for x in verify)):
+        raise app.ConfigError("landing needs a verify command (a non-empty list of strings): without one it is not a gate")
+    wt = Path(entry["path"])
+    res: dict = {"key": clean, "status": "refused", "reason": "", "files": [], "verify": None, "tree": None}
+
+    def done(status: str, reason: str = "") -> dict:
+        res["status"], res["reason"] = status, reason[:600]
+        return res
+
+    rc, base = _git(repo_root, "merge-base", "HEAD", entry.get("branch") or "HEAD")
+    if rc != 0 or not base.strip():
+        return done("refused", "the worktree shares no history with the project's HEAD")
+    project_tree, wt_tree = snapshot_tree(repo_root), snapshot_tree(wt)
+    skip = [f":(exclude,literal){f}" for f in entry.get("included_files") or []]   # copies of local files, not the agent's work
+    rc, names = _git(repo_root, "diff", "--name-only", "-z", base.strip(), wt_tree, "--", ".", *skip, timeout=30)
+    files = [n for n in names.split("\0") if n]
+    if rc != 0:
+        return done("refused", "could not compute what the worktree changed")
+    if not files:
+        return done("empty", "the worktree changed nothing")
+    res["files"] = files[:200]
+    secret = [f for f in files if chat.SECRET_NAMES.search(f)]
+    if secret:
+        return done("refused", f"the change touches secret-looking files: {', '.join(secret[:5])}")
+    landing = repo_root / ".harness" / "landing"
+    landing.mkdir(parents=True, exist_ok=True)
+    stage = landing / f"{clean}-{os.getpid()}-{int(time.time() * 1000) % 10_000_000}"
+    patch_file = landing / (stage.name + ".patch")
+    try:
+        # git writes the patch itself, byte for byte: a binary or non-UTF-8 file must not pass through a text decoder
+        rc, out = _run(["git", "diff", "--binary", "--full-index", "--no-color", f"--output={patch_file}", base.strip(), wt_tree, "--", ".", *skip], repo_root)
+        if rc != 0 or not patch_file.is_file() or patch_file.stat().st_size == 0:
+            return done("refused", f"could not build the patch: {out.strip()[-240:]}")
+        os.chmod(patch_file, 0o600)
+        patch_text = patch_file.read_text(encoding="utf-8", errors="replace")
+        if chat.SECRET_TEXT.search(_added_lines(patch_text)):
+            return done("refused", "the change adds secret-looking content")
+        violations = audit_reward_hacking(files, patch_text, protect_tests=protect_tests or bool(entry.get("protect_tests")))
+        if violations:
+            res["diagnostics"] = violations
+            return done("refused", violations[0]["message"])
+        rc, out = _run(["git", "worktree", "add", "--detach", str(stage), "HEAD"], repo_root)
+        if rc != 0:
+            return done("refused", f"could not create the staging copy: {out.strip()[-240:]}")
+        rc, out = _run(["git", "read-tree", "--reset", "-u", project_tree], stage)   # the project as it is now, uncommitted work included
+        if rc != 0:
+            return done("refused", f"could not reproduce the project in the staging copy: {out.strip()[-240:]}")
+        rc, out = _run(["git", "apply", "--index", "--check", str(patch_file)], stage)
+        if rc != 0:
+            return done("conflict", f"the change does not apply cleanly on the project as it is now: {out.strip()[-400:]}")
+        rc, out = _run(["git", "apply", "--index", str(patch_file)], stage)
+        if rc != 0:
+            return done("conflict", out.strip()[-400:])
+        rc, out = _run(["git", "write-tree"], stage)
+        verified_tree = out.strip()
+        if rc != 0 or not verified_tree:
+            return done("refused", "could not record the tree to verify")
+        _copy_worktreeinclude(repo_root, stage)
+
+        # The staging copy has no ignored files (.venv, node_modules): `{project}` in the command points at the project folder,
+        # so the tools installed there can be used while the code under test is the staging copy (the working directory).
+        t0 = time.monotonic()
+        code, out = _run([a.replace(PROJECT_SLOT, str(repo_root)) for a in verify], stage, timeout=timeout,
+                         env={**os.environ, "CAOS_PROJECT_ROOT": str(repo_root), "CAOS_LANDING": "1"})
+        res["verify"] = {"command": list(verify), "exit": code, "seconds": round(time.monotonic() - t0, 1),
+                         "tail": "(redacted: secret-like output)" if chat.SECRET_TEXT.search(out) else out[-_TAIL:]}
+        if code != 0:
+            return done("verify_failed", f"`{' '.join(verify)}` exited {code}")
+        if dry_run:
+            res["tree"] = verified_tree
+            return done("verified", f"{len(files)} file(s) apply cleanly and pass the verify command; nothing was applied (dry run)")
+
+        # From here on the project folder is written. It must still be what was verified against, and end as what was verified.
+        if snapshot_tree(repo_root) != project_tree:
+            return done("drifted", "the project folder changed while the change was being verified: nothing was applied, run the gate again")
+        rc, out = _run(["git", "apply", "--check", str(patch_file)], repo_root)
+        if rc != 0:
+            return done("conflict", f"the change does not apply on the project folder: {out.strip()[-400:]}")
+        rc, out = _run(["git", "apply", str(patch_file)], repo_root)
+        after = snapshot_tree(repo_root) if rc == 0 else None
+        if rc != 0 or after != verified_tree:
+            back, back_out = (_run(["git", "apply", "-R", str(patch_file)], repo_root) if rc == 0 else (0, ""))
+            restored = snapshot_tree(repo_root) == project_tree
+            why = out.strip()[-300:] if rc != 0 else "the project did not end as the tree that was verified"
+            return done("rolled_back", f"{why}; " + ("the project folder is back as it was" if restored and back == 0
+                                                      else f"ROLLBACK INCOMPLETE, check `git status`: {back_out.strip()[-200:]}"))
+        res["tree"] = verified_tree
+        with _META_LOCK:
+            meta = _load_meta(repo_root)
+            if clean in meta:
+                meta[clean]["landed"] = {"at": time.time(), "tree": verified_tree, "files": len(files), "verify": list(verify)}
+                _save_meta(repo_root, meta)
+        return done("landed", f"{len(files)} file(s) applied to the project folder as uncommitted work; verified tree {verified_tree[:12]}")
+    finally:
+        if stage.exists():
+            _run(["git", "worktree", "remove", "--force", str(stage)], repo_root)
+            shutil.rmtree(stage, ignore_errors=True)
+        _run(["git", "worktree", "prune"], repo_root)
+        try:
+            patch_file.unlink()
+        except OSError:
+            pass

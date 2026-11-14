@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
-import { FolderGit2, Gear, Globe, LayoutGrid, PanelLeft, Play, Search, SlidersHorizontal, Terminal, Users } from '../icons'
-import { CaosMark } from './CaosArt'
+import { FolderGit2, Gear, Globe, LayoutGrid, PanelLeft, Play, Search, SlidersHorizontal, Users, Workflow } from '../icons'
+import { HouseEmblem } from '../emblems'
 import { View, onTabKeys } from '../lib'
 
 interface HeaderProps {
@@ -23,7 +23,7 @@ interface HeaderProps {
 
 /* Six views in four places: the two you work in, and one for each kind of setup. The views of a group share a second row (see SubNav). */
 export const GROUPS: Array<{ id: string; label: string; views: View[]; Icon: React.ElementType }> = [
-  { id: 'console', label: 'Console', views: ['console'], Icon: Terminal },
+  { id: 'run', label: 'Run', views: ['run'], Icon: Workflow },
   { id: 'board', label: 'Board', views: ['board'], Icon: LayoutGrid },
   { id: 'team', label: 'Team', views: ['skills', 'share'], Icon: Users },
   { id: 'system', label: 'System', views: ['providers', 'metrics'], Icon: Gear },
@@ -67,12 +67,12 @@ export const Header: React.FC<HeaderProps> = ({
           aria-label={sidebarCollapsed ? 'Expandir barra lateral' : 'Colapsar barra lateral'}
           title={sidebarCollapsed ? 'Expandir panel' : 'Colapsar panel'}
         >
-          <PanelLeft className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
+          <PanelLeft className="icon" aria-hidden="true" />
         </button>
-        <span className="brand-mark" aria-hidden="true"><CaosMark size={22} /></span>
+        <span className="brand-mark" aria-hidden="true"><HouseEmblem size={28} /></span>
         <span className="brand-name">caos</span>
         {project && <span className="repo-pill" title={project}>{project}</span>}
-        {sample && <span className="chip amber-chip">demo</span>}
+        {sample && <span className="pill-mini amber-chip">demo</span>}
       </div>
 
       <nav className="tabs" role="tablist" aria-label="Vistas principales" onKeyDown={onTabKeys}>
@@ -89,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => !active && onView(views[0])}
               title={label}
             >
-              <Icon className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
+              <Icon className="icon" aria-hidden="true" />
               <span className="label">{label}</span>
               <span className="short-label">{label}</span>
               {id === 'board' && needsYou > 0 && (
@@ -104,8 +104,8 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="top-actions">
         <div className="seg scope-seg" role="group" aria-label="Alcance: este proyecto o todos">
-          <button type="button" aria-pressed={scope === 'project'} onClick={() => onScope('project')} title="Solo este proyecto"><FolderGit2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Proyecto</button>
-          <button type="button" aria-pressed={scope === 'global'} onClick={() => onScope('global')} title="Todos los proyectos registrados"><Globe className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Global</button>
+          <button type="button" aria-pressed={scope === 'project'} onClick={() => onScope('project')} title="Solo este proyecto"><FolderGit2 className="icon icon-sm" aria-hidden="true" />Proyecto</button>
+          <button type="button" aria-pressed={scope === 'global'} onClick={() => onScope('global')} title="Todos los proyectos registrados"><Globe className="icon icon-sm" aria-hidden="true" />Global</button>
         </div>
         {runnable > 0 && (
           <button
@@ -115,12 +115,12 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onRun}
             title="Ejecutar tareas pendientes en sus agentes (r)"
           >
-            <Play className="icon" style={{ width: 13, height: 13 }} fill="currentColor" aria-hidden="true" />
+            <Play className="icon icon-sm" weight="fill" />
             <span className="label">{running ? 'Corriendo…' : `Ejecutar ${runnable}`}</span>
           </button>
         )}
         <button type="button" className="search-btn" onClick={onOpenPalette} title="Paleta de comandos (Ctrl/⌘ K)">
-          <Search className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+          <Search className="icon icon-sm" aria-hidden="true" />
           <span className="kbd">⌘K</span>
         </button>
         <button
@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onTogglePrefs}
           title="Preferencias"
         >
-          <SlidersHorizontal className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />
+          <SlidersHorizontal className="icon" aria-hidden="true" />
         </button>
       </div>
     </header>

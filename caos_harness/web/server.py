@@ -18,7 +18,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .. import activity, app, chat, desktop, orchestrator, providers, workspaces, worktrees
+from .. import activity, app, chat, cycle, desktop, detect, missions, orchestrator, providers, scout as scouting, workspaces, worktrees
 from ..board.core import VERDICTS
 from ..engines.workstation import Run
 from ..router.route import choose, load_profiles, load_tiers
@@ -41,6 +41,8 @@ TYPES = {
 }
 LOOPBACK = re.compile(r"^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$")
 MAX_BODY = 64 * 1024
+MAX_NOTE = 4000        # characters of one review note: several inline notes travel together as one, a line each
+MAX_NOTE_LINES = 40
 ACTIVE_RUN = ("queued", "running", "awaiting_approval", "finishing")
 TERMINAL_RUN = ("completed", "failed", "stopped")
 HEARTBEAT = 12.0   # seconds of silence after which an event stream sends a comment line, so a dead client is noticed
@@ -50,6 +52,24 @@ CSP = (
     "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
     "frame-src about:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
+
+
+class NotFound(Exception):
+    """The thing a request names does not exist: answered with 404, where a refused change is 409."""
+
+
+def clean_note(raw) -> str:
+    """A review note as it is stored: one note per line, no control characters, within the limits. Too long is refused, never cut."""
+    if raw is not None and not isinstance(raw, str):
+        raise app.ConfigError("the note must be text")
+    lines = [" ".join(re.sub(r"[\x00-\x1f\x7f]", " ", ln).split()) for ln in (raw or "").replace("\r", "\n").split("\n")]
+    lines = [ln for ln in lines if ln]
+    note = "\n".join(lines)
+    if len(note) > MAX_NOTE:
+        raise app.ConfigError(f"the note is too long: {len(note)} characters, the limit is {MAX_NOTE}")
+    if len(lines) > MAX_NOTE_LINES:
+        raise app.ConfigError(f"too many notes in one return: {len(lines)}, the limit is {MAX_NOTE_LINES}")
+    return note
 
 
 def app_reports() -> Path:
@@ -78,6 +98,8 @@ def task_row(r) -> dict:
         "parent_id": r["parent_id"],
         "criteria": r["criteria"],
         "worktree_key": r["worktree_key"],
+        "position": r["position"] if "position" in r.keys() and r["position"] is not None else r["id"],   # the order inside its queue; trades places on reorder
+        "effort": r["effort"] if "effort" in r.keys() else None,
     }
 
 
@@ -102,6 +124,7 @@ class TaskRun:
         self.session_id: str | None = None
         self.worktree: dict | None = None
         self.trusted: set[str] = set()
+        self.duration_ms: int | None = None
         self.on_change = None
 
     def _changed(self) -> None:
@@ -129,6 +152,7 @@ class TaskRun:
                 "answer": self.answer,
                 "error": self.error,
                 "cancelled": self._cancelled,
+                "duration_ms": self.duration_ms,
             }
 
     def cancel(self) -> None:
@@ -159,6 +183,7 @@ class TaskRun:
             res = app.run_task(self.project, self.task_id)
             dur = round((time.monotonic() - t0) * 1000)
             with self._lock:
+                self.duration_ms = dur
                 if self._cancelled:
                     return
                 self.steps[-1]["duration_ms"] = dur
@@ -206,6 +231,8 @@ class Api:
         self.trusted_by_session: dict[str, set[str]] = {}
         self.bus = EventBus()
         self.orch_factory = None   # tests give the orchestrator a dispatcher with a fake runner
+        self.task_dispatcher = None   # tests give "run now" a dispatcher with a fake runner
+        self.running_tasks: set[int] = set()   # tasks started one by one with "run now" that have not come back yet
         self._watch_board()
 
     def _watch_board(self) -> None:
@@ -285,15 +312,24 @@ class Api:
                 command = providers.cli_command(cid, model if isinstance(model, str) and model.strip() else None)
             except ValueError as e:
                 raise app.ConfigError(str(e)) from e
-            block = providers.agent_block(name, command=command, timeout=providers.CLIS[cid]["timeout"])
+            effort = self._effort(body.get("effort"), command, None, providers.CLIS[cid]["label"])
+            block = providers.agent_block(name, command=command, timeout=providers.CLIS[cid]["timeout"], effort=effort)
         elif kind == "api":
             pid, model = body.get("provider"), body.get("model")
             if pid not in providers.API or not isinstance(model, str) or not providers.MODEL.fullmatch(model):
                 raise app.ConfigError("give a configured API provider and a model name")
             name = name or f"{pid}-{re.sub(r'[^a-z0-9]+', '-', model.lower()).strip('-')}"[:32]
+            self._effort(body.get("effort"), (), pid, pid)
             block = providers.agent_block(name, provider=pid, model=model, timeout=300)
+        elif kind == "local":
+            model = body.get("model")
+            if not isinstance(model, str) or not providers.MODEL.fullmatch(model):
+                raise app.ConfigError("give a valid Ollama model name")
+            base = re.sub(r"[^a-z0-9]+", "-", model.split(":", 1)[0].lower()).strip("-") or "local"
+            name = name or base[:24]
+            block = providers.agent_block(name, command=["ollama", "run", model], timeout=300)
         else:
-            raise app.ConfigError("kind must be cli or api")
+            raise app.ConfigError("kind must be cli, api or local")
         if not providers.NAME.fullmatch(name) or name == app.PERSON or name in self.p.agents:
             raise app.ConfigError(f"the agent name '{name}' is taken or not valid (lowercase letters, digits, - and _)")
         if cfg.is_symlink() or cfg.resolve().parent != self.p.root.resolve():
@@ -311,6 +347,51 @@ class Api:
         self.p.agents.update(fresh.agents)
         return {"name": name, "agents": list(self.p.agents)}
 
+    @staticmethod
+    def _effort(raw, command, provider, label: str) -> str | None:
+        """The effort a request asks for, or None for the agent's own default. Refused, with the reason, where the tool takes none."""
+        if raw in (None, ""):
+            return None
+        if raw not in providers.EFFORTS:
+            raise app.ConfigError(f"effort must be one of {', '.join(providers.EFFORTS)}, or empty for the agent's default")
+        can, why = providers.effort_support(command, provider)
+        if not can:
+            raise app.ConfigError(f"{label} cannot take an effort level: {why}")
+        return raw
+
+    def set_agent_effort(self, body: dict) -> dict:
+        """Writes (or removes) `effort` in the `[agents.<name>]` table of harness.toml and reloads it. Nothing else in the file moves."""
+        name = body.get("name")
+        a = self.p.agents.get(name) if isinstance(name, str) else None
+        if a is None:
+            raise NotFound(f"no agent {name}")
+        effort = self._effort(body.get("effort"), a.command, a.provider, a.name)
+        cfg = self.p.root / app.CONFIG
+        if cfg.is_symlink() or cfg.resolve().parent != self.p.root.resolve():
+            raise app.ConfigError("harness.toml must be a plain file inside the project folder to be edited from here")
+        before = cfg.read_text(encoding="utf-8")
+        lines = before.split("\n")
+        head = re.compile(r"\s*\[\s*agents\s*\.\s*(?:\"%s\"|%s)\s*\]\s*(#.*)?" % (re.escape(a.name), re.escape(a.name)))
+        start = next((i for i, ln in enumerate(lines) if head.fullmatch(ln)), None)
+        if start is None:
+            raise app.ConfigError(f"[agents.{a.name}] is not written as its own table in harness.toml: set effort there by hand")
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+        body_lines = [ln for ln in lines[start + 1:end] if not re.match(r"\s*effort\s*=", ln)]
+        if effort:
+            last = max((i for i, ln in enumerate(body_lines) if ln.strip() and not ln.lstrip().startswith("#")), default=-1)
+            body_lines.insert(last + 1, f"effort = {json.dumps(effort)}")
+        self._write_text(cfg, "\n".join(lines[:start + 1] + body_lines + lines[end:]))
+        try:
+            fresh = app.load(cfg)
+            if (fresh.agents[a.name].effort or None) != effort:
+                raise app.ConfigError("harness.toml did not take the change: set effort there by hand")
+        except (app.ConfigError, KeyError) as e:
+            self._write_text(cfg, before)
+            raise app.ConfigError(str(e)) from e
+        self.p.agents[a.name] = fresh.agents[a.name]
+        self._changed("board")
+        return {"name": a.name, "effort": effort}
+
     def save_custom_provider(self, cp: dict) -> dict:
         return team_ops.save_provider_entry(self.p, cp)
 
@@ -323,6 +404,14 @@ class Api:
     def workspace_add(self, body: dict) -> dict:
         workspaces.register(body.get("path"), bool(body.get("initialize")))
         return self.workspaces()
+
+    def detect(self, path: str | None = None) -> dict:
+        target = workspaces.check(path) if path else self.p.root
+        return detect.scan(target)
+
+    def detect_apply(self, body: dict) -> dict:
+        target = workspaces.check(body.get("path")) if body.get("path") else self.p.root
+        return detect.apply_init(target, overwrite=bool(body.get("overwrite")))
 
     def workspace_remove(self, body: dict) -> dict:
         target = workspaces.check(body.get("path"))
@@ -379,6 +468,125 @@ class Api:
 
     def tools_info(self) -> dict:
         return team_ops.tools_payload(self.p)
+
+    def missions(self) -> dict:
+        return missions.detect_missions(self.p)
+
+    # ─ the Run view: cycles, the landed branch, how reliable each reviewer is, and what every call cost ─
+    def run_overview(self, since: float | None = None) -> dict:
+        from .. import cycle, landed, ledger, scout as scouting
+        root = self.p.root
+        git_repo = worktrees.is_git_repo(root) and worktrees.has_head(root)
+        land = landed.overview(root) if git_repo else {"branch": landed.BRANCH, "tip": None, "base": None, "entries": [], "files": [], "checked_out": False}
+        done = {e["worktree"] for e in land["entries"]}
+        cycles = cycle.recent(self.p, 30)
+        last = {}
+        for c in cycles[::-1]:   # oldest first, so the newest status of each worktree wins
+            last[c["key"]] = c["status"]
+        waiting = [{"key": k, "branch": w.get("branch"), "created_at": w.get("created_at"), "last": last.get(k)}
+                   for k, w in (worktrees.active_worktrees(root) if git_repo else {}).items() if k not in done][:20]
+        try:
+            cfg = orchestrator.landing_config(self.p)
+        except app.ConfigError as e:
+            cfg = {"verify": None, "timeout": 900.0, "autonomous": False, "verifier": None, "target": "branch", "error": str(e)}
+        agents = [n for n, a in self.p.agents.items() if orchestrator.family(a) is not None]
+        # the stations: every AI agent of the project, what it is for (from what it has actually done), and whether it runs now
+        led = ledger.summary(self.p)
+        by_agent = {r["agent"]: r for r in led["agents"]}
+        last_call = ledger.last_calls(self.p)
+        vstats = {v["verifier"]: v for v in cycle.verifier_stats(self.p)}
+        authors, reviewers = {c["author"] for c in cycles}, {c["review"]["verifier"] for c in cycles}
+        scouts = [c["name"] for c in scouting.scouts(self.p)]
+        with self.p._mu:
+            busy = set(self.p._busy)
+        live_by_agent = {}
+        try:
+            with self.p.board.lock:
+                sending_rows = self.p.board.conn.execute(
+                    "SELECT id, queue, text, created FROM tasks WHERE status='sending' ORDER BY id DESC"
+                ).fetchall()
+            for row in sending_rows:
+                tid, qname, ttext, tcreated = row[0], row[1], row[2], row[3]
+                if qname in live_by_agent:
+                    continue
+                step_lbl = ""
+                started = float(tcreated or 0) or None
+                try:
+                    tl = self.p.traces.timeline(tid)
+                    if tl:
+                        ev = tl[-1]
+                        started = float(tl[0].get("ts") or started or 0) or started
+                        step_lbl = " · ".join(x for x in (ev.get("kind") or ev.get("status"), ev.get("name")) if x)
+                except Exception:
+                    pass
+                live_by_agent[qname] = {
+                    "task_id": tid,
+                    "text": (ttext or "")[:90],
+                    "step": step_lbl or "ejecutando tarea",
+                    "started_at": started,
+                }
+        except Exception:
+            pass
+        stations = []
+        for n in agents:
+            a = self.p.agents[n]
+            roles = [r for r, on in (("scout", bool(scouts) and scouts[0] == n), ("author", n in authors), ("reviewer", n in reviewers or cfg.get("verifier") == n)) if on]
+            r = by_agent.get(n, {})
+            is_running = (n in busy) or (n in live_by_agent)
+            stations.append({"name": n, "family": orchestrator.family(a), "tier": scouting.cost_tier(a), "model": a.model or a.system or (a.command[-1] if a.command and "/" in a.command[-1] else ""),
+                             "roles": roles, "running": is_running, "live": live_by_agent.get(n), "last": last_call.get(n), "calls": r.get("calls", 0), "failed": r.get("failed", 0), "seconds": r.get("seconds", 0.0),
+                             "caught": vstats[n]["caught"] if n in vstats else None, "reviewed_failing": vstats[n]["failed"] if n in vstats else None})
+        with self.p.board.lock:
+            needs_you = self.p.board.conn.execute("SELECT COUNT(*) FROM tasks WHERE (status='sent' AND result IS NOT NULL AND (review IS NULL OR review='verify')) OR (status='pending' AND queue=?)", (app.PERSON,)).fetchone()[0]
+        t0 = float(since) if since else 0.0
+        recent = [c for c in cycles if c.get("at", 0) > t0]
+        shift = {"since": t0 or None, "landed": sum(c["status"] == "landed" for c in recent), "failed": sum(c["status"] == "verify_failed" for c in recent),
+                 "rejected": sum(c["status"] == "rejected" for c in recent), "needs_you": needs_you, **ledger.since(self.p, t0)}
+        tiers = {}
+        for r in led["agents"]:
+            tiers[r["tier"] or "tool"] = tiers.get(r["tier"] or "tool", 0) + r["calls"]
+        return {"git_repo": git_repo, "cycles": cycles, "landed": land, "verifiers": cycle.verifier_stats(self.p),
+                "ledger": led, "waiting": waiting, "config": cfg, "agents": agents,
+                "stations": stations, "activity": ledger.activity(self.p), "shift": shift, "tiers": tiers,
+                "families": {n: (orchestrator.family(a) or "tool") for n, a in self.p.agents.items()}}
+
+    def landed_diff(self) -> dict:
+        from .. import landed
+        return {"diff": landed.diff(self.p.root)}
+
+    def landed_undo(self, body: dict) -> dict:
+        from .. import landed
+        return landed.undo(self.p.root, str(body.get("expected") or "") or None)
+
+    def cycle_run(self, body: dict) -> dict:
+        from .. import cycle
+        key, author = str(body.get("key") or ""), str(body.get("author") or "")
+        if author not in self.p.agents:
+            raise app.ConfigError("choose the agent that made the change")
+        return cycle.run_cycle(self.p, key, author, body.get("verifier") or None, apply=True if body.get("apply") else None, auto_redo=bool(body.get("redo")))
+
+    # ─ skills that learn from returns (skill_eval): the numbers, a proposal from a cheap reader, and its trial ─
+    def skills_evidence(self) -> dict:
+        from .. import skill_eval
+        return {"skills": skill_eval.overview(self.p), "min_decided": skill_eval.MIN_DECIDED, "min_evidence_tasks": skill_eval.MIN_EVIDENCE_TASKS}
+
+    def _skill_loop(self, fn):
+        try:
+            return fn()
+        except (ValueError, RuntimeError) as e:
+            raise app.ConfigError(str(e)) from e
+
+    def skill_propose(self, body: dict) -> dict:
+        from .. import skill_eval
+        return self._skill_loop(lambda: skill_eval.propose(self.p, str(body.get("skill") or ""), body.get("reader") or None))
+
+    def skill_trial_start(self, body: dict) -> dict:
+        from .. import skill_eval
+        return self._skill_loop(lambda: {"trial": skill_eval.start_trial(self.p, body.get("proposal")), "status": skill_eval.trial_status(self.p, str((body.get("proposal") or {}).get("skill") or ""))})
+
+    def skill_trial_close(self, body: dict) -> dict:
+        from .. import skill_eval
+        return self._skill_loop(lambda: skill_eval.close_trial(self.p, str(body.get("skill") or ""), body.get("force") or None))
 
     def skill_save(self, body: dict) -> dict:
         return team_ops.save_skill(self.p, body)
@@ -546,6 +754,7 @@ class Api:
         target_kind = body.get("target_kind")
         target = str(body.get("target") or "").strip()
         isolated = bool(body.get("isolated", False))
+        auto_cycle = bool(body.get("auto_cycle", False)) and isolated and mode == "act"
         base_url = body.get("base_url")
         intent_used = ""
 
@@ -665,7 +874,62 @@ class Api:
             self._write_json(root / ".harness" / f"{sid}.json", messages)
         self._evict_runs()
 
+        def _extract_citations(search_root: Path, steps: list[dict], text: str) -> list[str]:
+            seen: list[str] = []
+            resolved_root = search_root.resolve()
+
+            def _add(raw_path: str, line_num: str | int | None = None) -> None:
+                rel = raw_path.strip().lstrip("./")
+                if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+                    return
+                try:
+                    cand = (resolved_root / rel).resolve()
+                    if not cand.is_file() or (resolved_root not in cand.parents and cand != resolved_root):
+                        return
+                except OSError:
+                    return
+                cite = f"{rel}:{line_num}" if line_num else rel
+                if cite not in seen and len(seen) < 8:
+                    seen.append(cite)
+
+            for st in steps:
+                raw_in = str(st.get("input") or "")
+                try:
+                    parsed = json.loads(raw_in) if raw_in.startswith("{") else {}
+                except ValueError:
+                    parsed = {}
+                if isinstance(parsed, dict) and isinstance(parsed.get("path"), str):
+                    _add(parsed["path"], parsed.get("start_line") or None)
+                name = str(st.get("name") or "")
+                if ":" in name and not name.startswith("Shell"):
+                    maybe_path = name.split(":", 1)[1].strip()
+                    if maybe_path:
+                        _add(maybe_path)
+            for m_cite in re.finditer(r"(?<![\w/.-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,8})(?::(\d{1,6}))?", text or ""):
+                _add(m_cite.group(1), m_cite.group(2))
+            return seen
+
+        def _turn_cost_tier(prov: str, mod: str, agent_obj) -> str:
+            if agent_obj is not None:
+                return scouting.cost_tier(agent_obj)
+            if prov == "ollama":
+                return "free"
+            preset = providers.API.get(prov) or providers.PRESETS.get(prov) or {}
+            if mod.endswith(":free") or mod in (preset.get("free_models") or ()):
+                return "free"
+            return "paid"
+
+        def _turn_family(prov: str, agent_obj) -> str:
+            if agent_obj is not None:
+                return orchestrator.family(agent_obj) or "tool"
+            if prov == "ollama":
+                return "local"
+            if prov in ("claude", "codex", "agy", "opencode"):
+                return prov
+            return "api"
+
         def work():
+            t0_run = time.monotonic()
             try:
                 try:
                     run.execute()
@@ -673,12 +937,29 @@ class Api:
                     with run._lock:
                         run.error = run.error or f"{type(exc).__name__}: {str(exc)[:300]}"
                 result = run.snapshot()
+                dur_ms = result.get("duration_ms")
+                if dur_ms is None:
+                    dur_ms = round((time.monotonic() - t0_run) * 1000)
                 try:
                     diff_text = worktrees.workspace_diff(exec_root, max_bytes=16384).get("diff") or None
                 except Exception:
                     diff_text = None
                 if diff_text:
                     run.diff_text = diff_text
+                cycle_res = None
+                if auto_cycle and wt_info and diff_text and not result.get("error") and not result.get("cancelled"):
+                    try:
+                        used_mod = result.get("model") or model
+                        used_prov = result.get("provider") or provider
+                        cycle_author = (result.get("queue") if not direct_exec else None) or next(
+                            (n for n, a in project.agents.items() if (a.model or "") == used_mod),
+                            None,
+                        ) or f"{used_prov}:{used_mod}"
+                        cycle_res = cycle.run_cycle(project, wt_info["key"], cycle_author, apply=None, factory=self.orch_factory)
+                        run.cycle_result = cycle_res
+                    except Exception as exc:
+                        cycle_res = {"status": "error", "reason": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                        run.cycle_result = cycle_res
                 with self.session_lock:
                     if direct_exec and getattr(run, "trusted", None):
                         self.trusted_by_session.setdefault(sid, set()).update(run.trusted)
@@ -690,21 +971,29 @@ class Api:
                         a_info = project.agents.get(result.get("queue", "")) if not direct_exec else None
                         u = result.get("usage") or {}
                         tok = int(u.get("prompt_tokens") or 0) + int(u.get("completion_tokens") or 0)
+                        used_mod = result.get("model") or model
+                        used_prov = (a_info.provider if a_info and a_info.provider else result.get("provider") or provider if direct_exec else target_kind)
                         reply_msg = {
                             "id": "reply-" + run.id,
                             "role": "assistant",
                             "content": reply_text,
                             "timestamp": time.time(),
-                            "model": result.get("model") or model,
-                            "provider": (a_info.provider if a_info and a_info.provider else result.get("provider") or provider if direct_exec else target_kind),
+                            "model": used_mod,
+                            "provider": used_prov,
+                            "family": _turn_family(used_prov, a_info),
+                            "cost_tier": _turn_cost_tier(used_prov, used_mod, a_info),
+                            "duration_ms": dur_ms,
                             "target_kind": target_kind,
                             "target": target,
                             "agent": role,
                             "tool_steps": result["steps"],
+                            "citations": _extract_citations(exec_root, result["steps"], reply_text),
                             "questions": result.get("questions") or [],
                             "run_id": run.id,
                             "diff": diff_text,
                         }
+                        if cycle_res is not None:
+                            reply_msg["cycle"] = cycle_res
                         if tok > 0:
                             reply_msg["tokens"] = tok
                         if task_id is not None:
@@ -747,6 +1036,8 @@ class Api:
             snap["worktree"] = run.worktree
         if getattr(run, "diff_text", None):
             snap["diff"] = run.diff_text
+        if getattr(run, "cycle_result", None):
+            snap["cycle"] = run.cycle_result
         return snap
 
     def run_cancel(self, run_id: str) -> dict:
@@ -791,7 +1082,16 @@ class Api:
         scout = body.get("scout", "auto")
         if scout is not None and not isinstance(scout, str):
             raise app.ConfigError("scout must be an agent name, auto or off")
-        plan = orchestrator.plan_orchestration(self.p, goal, name, pool, self.orch_factory, scout)
+        orch_model = body.get("orchestrator_model")
+        if orch_model is not None and not isinstance(orch_model, str):
+            raise app.ConfigError("orchestrator_model must be a model name")
+        agent_models = body.get("agent_models")
+        if agent_models is not None and not isinstance(agent_models, dict):
+            raise app.ConfigError("agent_models must be a mapping of agent -> model")
+        plan = orchestrator.plan_orchestration(
+            self.p, goal, name, pool, self.orch_factory, scout,
+            orchestrator_model=orch_model, agent_models=agent_models,
+        )
         plan["suggested"] = opts["suggested"]
         if body.get("auto_execute") is True:
             return self.orchestrate_launch({"session_id": body.get("session_id"), "plan": plan})
@@ -810,7 +1110,7 @@ class Api:
                 raise app.ConfigError("No such session")
             if self._session_busy(sid):
                 raise app.ConfigError("This session already has a run in progress")
-            run = orchestrator.OrchestrationRun(project, plan, session_id=sid, factory=self.orch_factory)
+            run = orchestrator.OrchestrationRun(project, plan, session_id=sid, factory=self.orch_factory, cycle=bool(body.get("auto_cycle", False)))
             self._watch_run(run)
             self.runs[run.id] = run
             messages = session["messages"]
@@ -831,11 +1131,16 @@ class Api:
                     with run._lock:
                         run.error = run.error or f"{type(exc).__name__}: {str(exc)[:300]}"
                 snap = run.snapshot()
+                orch_agent = project.agents.get(plan["orchestrator"])
+                orch_fam = orchestrator.family(orch_agent) or "tool" if orch_agent else "api"
+                orch_tier = scouting.cost_tier(orch_agent) if orch_agent else "paid"
+                scout_used = plan.get("scout") if any(s.get("brief") for s in (snap.get("orchestration") or {}).get("subtasks") or []) else None
                 with self.session_lock:
                     if any(s.get("id") == sid for s in self._sessions(root)):
                         msgs = self._read_json(root / ".harness" / f"{sid}.json", [])
                         msgs.append({"id": "reply-" + run.id, "role": "assistant", "content": snap["answer"] or snap["error"] or "Stopped waiting.",
-                                     "timestamp": time.time(), "model": snap["model"], "provider": "orchestrator", "target_kind": "orchestrate",
+                                     "timestamp": time.time(), "model": snap["model"], "provider": "orchestrator", "family": orch_fam, "cost_tier": orch_tier,
+                                     "duration_ms": snap.get("duration_ms"), "scout_agent": scout_used, "target_kind": "orchestrate",
                                      "target": plan["orchestrator"], "agent": "auto", "tool_steps": snap["steps"], "questions": [], "run_id": run.id,
                                      "task_id": snap["task_id"], "orchestration": snap["orchestration"]})
                         self._write_json(root / ".harness" / f"{sid}.json", msgs)
@@ -877,12 +1182,15 @@ class Api:
                 "name": a.name,
                 "system": a.system,
                 "provider": a.provider,
-                "model": a.model,
+                "model": providers.model_of(a.command, a.provider, a.model, a.system),
+                "family": orchestrator.family(a),
                 "command": " ".join(a.command),
                 "timeout": a.timeout,
                 "pending": sum(1 for t in tasks if t["queue"] == a.name and t["status"] == "pending"),
                 "working": sum(1 for t in tasks if t["agent"] == a.name and t["status"] == "sending"),
                 "test": orchestrator.family(a) is None,   # a plain command (cat, a script): a test engine, hidden from the pickers until it has work
+                "effort": a.effort,
+                "effort_support": dict(zip(("supported", "reason"), providers.effort_support(a.command, a.provider))),
             }
             for a in self.p.agents.values()
         ]
@@ -896,6 +1204,7 @@ class Api:
             "summary": app.summary(self.p),
             "quality": self.quality(),
             "running": self.running.locked(),
+            "running_tasks": sorted(self.running_tasks),
             "last_run": self.last_run,
             "sample": (self.p.root / ".harness" / "sample").is_file(),
             "skills": [
@@ -925,13 +1234,17 @@ class Api:
         text = body.get("text")
         if not isinstance(text, str) or not text.strip():
             raise app.ConfigError("the task needs a text")
-        tid, queue, why = app.add_task(self.p, text, body.get("queue") or None, body.get("skill") or None, body.get("tier") or None)
+        effort = body.get("effort") or None
+        if effort is not None and effort not in providers.EFFORTS:
+            raise app.ConfigError(f"effort must be one of {', '.join(providers.EFFORTS)}, or empty for the agent's default")
+        tid, queue, why = app.add_task(self.p, text, body.get("queue") or None, body.get("skill") or None, body.get("tier") or None, effort)
         return {"id": tid, "queue": queue, "why": why}
 
     def review(self, tid: int, body: dict) -> dict:
-        verdict, note = body.get("verdict"), str(body.get("note") or "").strip()
+        verdict = body.get("verdict")
         if verdict not in VERDICTS:
             raise app.ConfigError(f"verdict must be one of {', '.join(VERDICTS)}")
+        note = clean_note(body.get("note"))
         if verdict == "redo" and not note:
             raise app.ConfigError("a redo needs a note: say what to fix")
         if not self.p.board.review(tid, verdict, note):
@@ -1020,6 +1333,61 @@ class Api:
         if not self.p.board.requeue(tid, queue):
             raise app.ConfigError("only a pending task that is not already there can be moved")
         return {"id": tid, "queue": queue}
+
+    def reorder(self, tid: int, body: dict) -> dict:
+        """Places a task that has not been sent just before another one of its own queue, or last in that queue."""
+        before = body.get("before")
+        if before is not None and (isinstance(before, bool) or not isinstance(before, int)):
+            raise app.ConfigError("before must be a task id, or null for the end of the queue")
+        r = self.p.board.get(tid)
+        if not r:
+            raise NotFound(f"no task {tid}")
+        if r["status"] != "pending":
+            raise app.ConfigError("only a task that has not been sent can be reordered")
+        if before is not None:
+            o = self.p.board.get(before)
+            if not o or o["status"] != "pending" or o["queue"] != r["queue"]:
+                raise app.ConfigError("a task is reordered inside its own queue, against a task that has not been sent")
+        return {"id": tid, "before": before, "moved": self.p.board.reorder(tid, before)}
+
+    def run_task(self, tid: int, wait: bool = False) -> dict:
+        """Runs one pending task now, alone: nothing else in the queues is sent."""
+        r = self.p.board.get(tid)
+        if not r:
+            raise NotFound(f"no task {tid}")
+        if r["status"] != "pending":
+            raise app.ConfigError(f"task {tid} was already sent")
+        if r["queue"] == app.PERSON:
+            raise app.ConfigError(f"task {tid} waits for a person: it is not run by an agent")
+        if r["queue"] not in self.p.agents:
+            raise app.ConfigError(f"no agent {r['queue']} in {app.CONFIG}")
+        with self.p._mu:
+            taken = tid in self.p._reserved or tid in self.running_tasks
+            busy = r["queue"] in self.p._busy
+            if not taken and not busy:
+                self.running_tasks.add(tid)
+        if taken:
+            raise app.ConfigError(f"task {tid} is already being run")
+        if busy:
+            raise app.ConfigError(f"{r['queue']} is busy with another task: run this one when it finishes")
+
+        def work():
+            try:
+                res = app.run_task(self.p, tid, self.task_dispatcher)
+                self.last_run = [{k: res[k] for k in ("id", "agent", "ok", "reason")}]
+            except Exception as e:
+                self.last_run = [{"id": tid, "agent": r["queue"], "ok": False, "reason": type(e).__name__}]
+            finally:
+                with self.p._mu:
+                    self.running_tasks.discard(tid)
+                self._changed("board")
+
+        th = threading.Thread(target=work, daemon=True)
+        th.start()
+        self._changed("board")
+        if wait:
+            th.join()
+        return {"started": True, "id": tid}
 
     def discard(self, tid: int) -> dict:
         if not self.p.board.discard(tid):
@@ -1216,6 +1584,18 @@ def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False)
                 return self.send_json(200, api.orchestrate_options((query.get("goal") or [""])[0][:4000]))
             if path == "/api/tools":
                 return self.send_json(200, api.tools_info())
+            if path == "/api/missions":
+                return self.send_json(200, api.missions())
+            if path == "/api/skills/evidence":
+                return self.send_json(200, api.skills_evidence())
+            if path == "/api/run/overview":
+                try:
+                    since = float((query.get("since") or ["0"])[0])
+                except ValueError:
+                    since = 0.0
+                return self.send_json(200, api.run_overview(since))
+            if path == "/api/landed/diff":
+                return self.send_json(200, api.landed_diff())
             if path == "/api/share/exports":
                 return self.send_json(200, api.share_exports())
             if path == "/api/share/preview":
@@ -1243,6 +1623,8 @@ def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False)
                 return
             if path == "/api/workspaces":
                 return self.send_json(200, api.workspaces())
+            if path == "/api/detect":
+                return self.send_json(200, api.detect((query.get("path") or [None])[0]))
             if path == "/api/repositories":
                 return self.send_json(200, api.repositories())
             if path == "/api/workspace/status":
@@ -1323,6 +1705,8 @@ def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False)
                     return self.send_json(200, api.save_ollama_host(body))
                 if path == "/api/intents":
                     return self.send_json(200, api.save_intent_override(body))
+                if path == "/api/agents/effort":
+                    return self.send_json(200, api.set_agent_effort(body))
                 if path == "/api/agents":
                     return self.send_json(201, api.add_agent(body))
                 if path == "/api/metrics/demote":
@@ -1333,6 +1717,16 @@ def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False)
                     return self.send_json(201, api.skill_clone(body))
                 if path == "/api/skills/save":
                     return self.send_json(200, api.skill_save(body))
+                if path == "/api/landed/undo":
+                    return self.send_json(200, api.landed_undo(body))
+                if path == "/api/cycle/run":
+                    return self.send_json(200, api.cycle_run(body))
+                if path == "/api/skills/propose":
+                    return self.send_json(200, api.skill_propose(body))
+                if path == "/api/skills/trial/start":
+                    return self.send_json(201, api.skill_trial_start(body))
+                if path == "/api/skills/trial/close":
+                    return self.send_json(200, api.skill_trial_close(body))
                 if path == "/api/share/doctor":
                     return self.send_json(200, api.share_doctor(body))
                 if path == "/api/share/pack":
@@ -1347,6 +1741,8 @@ def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False)
                     return self.send_json(200, api.workspace_switch(body))
                 if path == "/api/workspaces/remove":
                     return self.send_json(200, api.workspace_remove(body))
+                if path == "/api/detect/apply":
+                    return self.send_json(200, api.detect_apply(body))
                 if path == "/api/workspace/convert_task":
                     return self.send_json(201, api.add(body))
                 if path == "/api/workspace/worktree/patch":
@@ -1385,10 +1781,16 @@ def make_handler(api: Api, token: str | None = None, desktop_mode: bool = False)
                 m_move = re.fullmatch(r"/api/task/(\d+)/move", path)
                 if m_move:
                     return self.send_json(200, api.move(int(m_move.group(1)), body))
+                m_one = re.fullmatch(r"/api/task/(\d+)/(run|reorder)", path)
+                if m_one:
+                    tid = int(m_one.group(1))
+                    return self.send_json(202, api.run_task(tid)) if m_one.group(2) == "run" else self.send_json(200, api.reorder(tid, body))
                 m = re.fullmatch(r"/api/task/(\d+)/(review|discard)", path)
                 if m:
                     tid = int(m.group(1))
                     return self.send_json(200, api.review(tid, body) if m.group(2) == "review" else api.discard(tid))
+            except NotFound as e:
+                return self.send_json(404, {"error": str(e)})
             except app.ConfigError as e:
                 return self.send_json(409, {"error": str(e)})
             self.send_json(404, {"error": "unknown endpoint"})

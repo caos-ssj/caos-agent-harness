@@ -1,14 +1,25 @@
+export type Effort = 'low' | 'medium' | 'high'
+/** Whether a tool takes an effort level, and how it is sent (or why it is not). Never assumed: the server checks the command. */
+export interface EffortSupport {
+  supported: boolean
+  reason: string
+}
+
 export interface Agent {
   name: string
   system: string | null
   provider?: string | null
   model?: string | null
+  family?: string | null
   command: string
   timeout: number
   pending: number
   working: number
   /** A plain command, not an AI agent: kept out of the pickers unless it has work. */
   test?: boolean
+  /** The effort written for this agent in harness.toml, or null for the tool's own default. */
+  effort?: Effort | null
+  effort_support?: EffortSupport
 }
 
 export interface TaskRouterInfo {
@@ -39,6 +50,10 @@ export interface Task {
   criteria: string | null
   /** The isolated git worktree this subtask worked in, or null. */
   worktree_key: string | null
+  /** The order inside its queue (lower runs first). Two tasks of a queue trade places when one is dragged. */
+  position?: number
+  /** The effort this task asks its agent for, or null for the agent's own. */
+  effort?: Effort | null
 }
 
 export interface TraceEvent {
@@ -99,6 +114,8 @@ export interface StateResponse {
   summary?: BoardSummary
   quality?: Quality
   running: boolean
+  /** Tasks started one by one with "Run now" that have not come back yet. */
+  running_tasks?: number[]
   sample?: boolean
   last_run: Array<{ id: number; ok: boolean; reason: string }>
   skills: SkillInfo[]
@@ -218,6 +235,7 @@ export interface CliAgent {
   free_models?: string[]
   models?: string[]
   orchestrator_capable?: boolean
+  effort?: EffortSupport
 }
 
 export interface ProvidersResponse {
@@ -297,6 +315,8 @@ export interface ExecutionRun {
   questions?: AlignmentQuestion[]
   usage?: { prompt_tokens: number; completion_tokens: number }
   failover_used?: string | null
+  duration_ms?: number | null
+  cycle?: CycleRecord | null
   answer: string
   error: string
 }
@@ -443,6 +463,7 @@ export interface OrchestrationSubtask {
   id: string
   title: string
   agent: string
+  model?: string | null
   mode: OrchestrationMode
   skill: string | null
   depends_on: string[]
@@ -455,6 +476,7 @@ export interface OrchestrationSubtask {
 export interface OrchestrationPlan {
   goal: string
   orchestrator: string
+  orchestrator_model?: string | null
   pool: string[]
   /** The agent that reads ahead for the paid ones, or null when nobody does. */
   scout: string | null
@@ -472,6 +494,7 @@ export interface OrchestratorInfo {
   family: string | null
   kind: "cli" | "local" | "api" | "command"
   model: string | null
+  models?: string[]
   installed: boolean
   capable: boolean
 }
@@ -495,6 +518,7 @@ export interface OrchestrateOptions {
 
 /** A subtask while it runs and after: the plan's fields plus what the board and the agent produced. */
 export interface SubtaskRun extends OrchestrationSubtask {
+  family?: string | null
   state: SubtaskState
   task_id: number | null
   worktree: { key: string; path: string; branch: string } | null
@@ -512,6 +536,7 @@ export interface SubtaskRun extends OrchestrationSubtask {
 export interface OrchestrationState {
   goal: string
   orchestrator: string
+  orchestrator_model?: string | null
   summary: string
   phase: "queued" | "delegating" | "synthesizing" | "done" | "stopped"
   parent_id: number | null
@@ -524,6 +549,24 @@ export interface AlignmentQuestion {
   chips: string[]
 }
 
+export interface MissionItem {
+  id: string
+  kind: 'verify' | 'diff' | 'debt' | 'tests' | 'explore'
+  title: string
+  subtitle: string
+  prompt: string
+  mode: 'plan' | 'act'
+  citations: string[]
+  score: number
+}
+
+export interface MissionsResponse {
+  missions: MissionItem[]
+  scanned_files: number
+  has_git: boolean
+  has_tests: boolean
+}
+
 export interface MessageItem {
   id: string
   role: "user" | "assistant"
@@ -531,6 +574,12 @@ export interface MessageItem {
   timestamp: number
   model?: string
   provider?: string
+  family?: string
+  cost_tier?: "free" | "cheap" | "paid"
+  duration_ms?: number | null
+  scout_agent?: string | null
+  citations?: string[]
+  cycle?: CycleRecord | null
   target_kind?: "model" | "agent" | "tier" | "provider" | "intent" | "orchestrate"
   target?: string
   task_id?: number
@@ -692,10 +741,112 @@ export interface MetricsResponse {
       eval_precision: number | null
       regress_status: string | null
     }
+    scout?: {
+      briefs: number
+      cached: number
+      paid_avoided_calls: number
+    }
   }
   models: MetricsModelRow[]
   compare?: { runs: number; models: Array<{ provider: string; model: string; runs: number; ok_rate: number; p50_ms: number | null }> }
 }
+
+export interface CycleRecord {
+  id: string
+  at: number
+  key: string
+  status: string
+  reason: string
+  author: string
+  target: string
+  tasks: number[]
+  returned: boolean
+  review: { verifier: string; verdict: string; reason: string; seconds: number; files: string[]; checked: string[]; findings: { file: string; problem: string }[] }
+  landing: { status: string; reason: string; files?: string[]; conflicts?: string[]; commit?: string | null; tree?: string | null; verify: { command: string[]; exit: number; seconds: number; tail: string } | null }
+}
+
+export interface LedgerAgent { agent: string; tier: string; calls: number; failed: number; seconds: number; chars_in: number; chars_out: number; tokens_in: number | null; tokens_out: number | null; calls_with_tokens: number }
+
+export interface RunOverview {
+  git_repo: boolean
+  cycles: CycleRecord[]
+  landed: { branch: string; tip: string | null; base: string | null; checked_out: boolean; files: { path: string; added: number; removed: number }[]
+    entries: { commit: string; worktree: string | null; reviewed_by: string | null; verified: string | null; intact: boolean; foreign: boolean; at: number }[] }
+  verifiers: { verifier: string; cycles: number; failed: number; caught: number; approved: number; approved_passed: number; catch_rate_ci95: [number, number] | null; approval_precision_ci95: [number, number] | null }[]
+  ledger: { agents: LedgerAgent[]; calls: number; paid_calls: number; seconds: number; accepted: number; accepted_first_attempt: number }
+  waiting: { key: string; branch: string | null; created_at: number | null; last: string | null }[]
+  config: { verify: string[] | null; timeout: number; autonomous: boolean; verifier: string | null; target: string; error?: string }
+  agents: string[]
+  families: Record<string, string>
+  stations: Station[]
+  activity: { t: number; calls: number; failed: number; seconds: number }[]
+  shift: { since: number | null; landed: number; failed: number; rejected: number; needs_you: number; calls: number; paid_calls: number }
+  tiers: Record<string, number>
+}
+
+export interface Station {
+  name: string
+  family: string | null
+  tier: string
+  model: string
+  roles: string[]
+  running: boolean
+  live?: { task_id?: number | null; text?: string; step?: string; started_at?: number | null } | null
+  last: { ts: number; status: string; seconds: number } | null
+  calls: number
+  failed: number
+  seconds: number
+  caught: number | null
+  reviewed_failing: number | null
+}
+
+export interface SkillEvidence {
+  skill: string
+  agent: string | null
+  decided: number
+  first_pass: number
+  redos: number
+  open: number
+  rate: number
+  lower: number
+  upper: number
+  median_seconds: number | null
+}
+
+export interface SkillChange { kind: 'add_rule' | 'replace_rule' | 'remove_rule'; anchor?: string | null; text?: string | null }
+
+export interface SkillProposal {
+  skill: string
+  base_sha: string
+  problem: string
+  expected: string
+  evidence: { task: number; quote: string }[]
+  change: SkillChange
+}
+
+export interface SkillGate { decision: 'promote' | 'reject' | 'insufficient'; reason: string; baseline: SkillEvidence; candidate: SkillEvidence }
+
+export interface SkillTrial {
+  skill: string
+  started: number
+  base_sha: string
+  candidate_sha: string
+  problem: string
+  expected: string
+  change: SkillChange
+  gate: SkillGate
+}
+
+export interface SkillOverview {
+  skill: string
+  evidence: SkillEvidence | null
+  notes: { task: number; agent: string; note: string }[]
+  note_tasks: number
+  can_propose: boolean
+  trial: SkillTrial | null
+}
+
+export interface SkillProposeResult { reader: string | null; proposal: SkillProposal | null; problems: string[]; notes: number }
 
 export interface ToolInfo {
   id: string
@@ -756,6 +907,10 @@ export const api = {
   getWorkspaces: () => request<WorkspacesResponse>('/api/workspaces'),
   addWorkspace: (path: string, initialize = false) =>
     request<WorkspacesResponse>('/api/workspaces', { method: 'POST', body: JSON.stringify({ path, initialize }) }),
+  detectWorkspace: (path?: string) =>
+    request<{ folder: string; name: string; has_config: boolean; has_git: boolean; stacks: string[]; verify: string[] | null; verifier: string | null; engines: { name: string; kind: string; cost: string }[]; toml: string }>(
+      `/api/detect${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    ),
   switchWorkspace: (path: string) =>
     request<WorkspacesResponse>('/api/workspaces/switch', { method: 'POST', body: JSON.stringify({ path }) }),
   removeWorkspace: (path: string) =>
@@ -825,17 +980,19 @@ export const api = {
       intent?: string
       profile?: string
       isolated?: boolean
+      auto_cycle?: boolean
     }
   ) =>
     request<{ run_id: string; task_id?: number; attached?: string[]; refused?: string[]; worktree?: WorktreeInfo }>(`/api/sessions/${sessionId}/messages`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getMissions: () => request<MissionsResponse>('/api/missions'),
   getOrchestrateOptions: (goal = '') => request<OrchestrateOptions>(`/api/orchestrate/options?goal=${encodeURIComponent(goal.slice(0, 600))}`),
-  planOrchestration: (data: { goal: string; orchestrator?: string; pool?: string[]; scout?: string }) =>
+  planOrchestration: (data: { goal: string; orchestrator?: string; orchestrator_model?: string; pool?: string[]; agent_models?: Record<string, string>; scout?: string }) =>
     request<OrchestrationPlan>('/api/orchestrate/plan', { method: 'POST', body: JSON.stringify(data) }),
-  launchOrchestration: (sessionId: string, plan: OrchestrationPlan) =>
-    request<{ run_id: string; plan: OrchestrationPlan }>('/api/orchestrate/launch', { method: 'POST', body: JSON.stringify({ session_id: sessionId, plan }) }),
+  launchOrchestration: (sessionId: string, plan: OrchestrationPlan, auto_cycle = false) =>
+    request<{ run_id: string; plan: OrchestrationPlan }>('/api/orchestrate/launch', { method: 'POST', body: JSON.stringify({ session_id: sessionId, plan, auto_cycle }) }),
   getRun: (id: string) => request<ExecutionRun>(`/api/runs/${id}`),
   cancelRun: (id: string) => request<ExecutionRun>(`/api/runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
   decideRun: (id: string, step: number, approve: boolean, trust_session = false) =>
@@ -864,8 +1021,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ intent, provider, model }),
     }),
-  addAgent: (data: { kind: 'cli'; id: string; name?: string; model?: string } | { kind: 'api'; provider: string; model: string; name?: string }) =>
+  addAgent: (data: { kind: 'cli'; id: string; name?: string; model?: string; effort?: Effort | '' } | { kind: 'api'; provider: string; model: string; name?: string } | { kind: 'local'; model: string; name?: string }) =>
     request<{ name: string; agents: string[] }>('/api/agents', { method: 'POST', body: JSON.stringify(data) }),
+  setAgentEffort: (name: string, effort: Effort | '') =>
+    request<{ name: string; effort: Effort | null }>('/api/agents/effort', { method: 'POST', body: JSON.stringify({ name, effort }) }),
   saveFailover: (data: Partial<FailoverPolicy>) =>
     request<FailoverPolicy>('/api/providers/failover', {
       method: 'POST',
@@ -879,6 +1038,15 @@ export const api = {
       body: JSON.stringify({ provider, model, demoted, reason }),
     }),
   getTools: () => request<{ tools: ToolInfo[] }>('/api/tools'),
+  getRunOverview: (since = 0) => request<RunOverview>(`/api/run/overview?since=${since}`),
+  getLandedDiff: () => request<{ diff: string }>('/api/landed/diff'),
+  undoLanded: (expected: string) => request<{ ok: boolean; reason: string }>('/api/landed/undo', { method: 'POST', body: JSON.stringify({ expected }) }),
+  runCycle: (key: string, author: string) => request<CycleRecord>('/api/cycle/run', { method: 'POST', body: JSON.stringify({ key, author }) }),
+  getSkillEvidence: () => request<{ skills: SkillOverview[]; min_decided: number; min_evidence_tasks: number }>('/api/skills/evidence'),
+  proposeSkillChange: (skill: string) => request<SkillProposeResult>('/api/skills/propose', { method: 'POST', body: JSON.stringify({ skill }) }),
+  startSkillTrial: (proposal: SkillProposal) => request<{ status: SkillTrial }>('/api/skills/trial/start', { method: 'POST', body: JSON.stringify({ proposal }) }),
+  closeSkillTrial: (skill: string, force?: 'promote' | 'reject') =>
+    request<{ skill: string; decision: 'promote' | 'reject' | 'insufficient'; forced: boolean; gate: SkillGate }>('/api/skills/trial/close', { method: 'POST', body: JSON.stringify({ skill, force }) }),
   saveSkill: (data: { name: string; description: string; body: string; category?: string }) =>
     request<SkillInfo>('/api/skills/save', { method: 'POST', body: JSON.stringify(data) }),
   shareDoctor: (files?: string[]) =>
@@ -889,7 +1057,7 @@ export const api = {
     request<ShareUploadResponse>('/api/share/upload', { method: 'POST', body: JSON.stringify({ path, parent_id }) }),
   getShareExports: () => request<ShareExportsResponse>('/api/share/exports'),
   getTask: (id: number) => request<TaskDetail>(`/api/task/${id}`),
-  addTask: (data: { text: string; queue?: string; skill?: string; tier?: string }) =>
+  addTask: (data: { text: string; queue?: string; skill?: string; tier?: string; effort?: Effort | '' }) =>
     request<{ id: number; queue: string; why: string }>('/api/task', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -906,6 +1074,10 @@ export const api = {
     }),
   moveTask: (id: number, queue: string) =>
     request<{ id: number; queue: string }>(`/api/task/${id}/move`, { method: 'POST', body: JSON.stringify({ queue }) }),
+  runTask: (id: number) =>
+    request<{ started: boolean; id: number }>(`/api/task/${id}/run`, { method: 'POST', body: JSON.stringify({}) }),
+  reorderTask: (id: number, before: number | null) =>
+    request<{ id: number; before: number | null; moved: boolean }>(`/api/task/${id}/reorder`, { method: 'POST', body: JSON.stringify({ before }) }),
   discardTask: (id: number) =>
     request<{ id: number }>(`/api/task/${id}/discard`, {
       method: 'POST',

@@ -12,6 +12,14 @@ describe('English text for a Spanish interface', () => {
     expect(translate('3 skill(s) de Código & Infra')).toBe('3 skill(s) from Code & Infra')
     expect(translate('Plan: solo lectura')).toBe('Plan: read-only')
   })
+  it('translates preference controls, run tabs, and identity chat labels', () => {
+    expect(translate('Brillo ambiental')).toBe('Ambient glow')
+    expect(translate('Equilibrada')).toBe('Balanced')
+    expect(translate('Amplia')).toBe('Wide')
+    expect(translate('Primeras misiones')).toBe('First missions')
+    expect(translate('Revisores')).toBe('Reviewers')
+    expect(translate('2 brief(s) · 1 en caché')).toBe('2 brief(s) · 1 cached')
+  })
   it('leaves what is already English, and what the person wrote, alone', () => {
     expect(translate('Add a task')).toBe('Add a task')
     expect(translate('Quiero definir la politica de failover')).toBe('Quiero definir la politica de failover')

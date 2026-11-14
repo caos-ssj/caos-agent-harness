@@ -143,6 +143,13 @@ def test_a_task_too_long_for_one_argument_is_refused_not_truncated(project):
 def test_agy_and_opencode_are_agents_of_this_repositorys_own_harness_toml():
     p = app.load(Path(__file__).resolve().parent.parent / "harness.toml")
     assert p.agents["agy"].command[-2:] == ("-p", "{prompt}") and p.agents["opencode"].command[:3] == ("opencode", "run", "-m")
+    # the team this repository is worked with: every CLI names its model, so none falls back to an account default
+    assert p.agents["opencode"].command[-1] == "opencode/deepseek-v4.1-flash-free" and p.agents["pickle"].command[-1] == "opencode/big-pickle"
+    assert "--model" in p.agents["agy"].command
+    for name in ("claude", "haiku"):
+        cmd = p.agents[name].command
+        assert cmd[0] == "claude" and cmd[cmd.index("--model") + 1] in ("sonnet", "haiku")
+    assert orchestrator.landing_config(p)["verify"][0] == "{project}/.venv/bin/python"
 
 
 # ── parallel run_pending ──
@@ -618,3 +625,53 @@ def test_orchestration_payloads_have_no_field_the_page_does_not_declare(project)
     a = Api(project)
     sid = a.session_create({})["id"]
     assert set(a.session_get(sid)) <= ts_fields("SessionDetail")
+
+
+def test_orchestrator_and_subtask_models_can_be_chosen_per_plan_and_override_cli_commands(project, api):
+    assert providers.model_of(command=["opencode", "run", "-m", "opencode/glm-5.3-flash-free"]) == "opencode/glm-5.3-flash-free"
+    assert providers.model_of(command=["ollama", "run", "qwen2.5:7b"]) == "qwen2.5:7b"
+    assert providers.model_of(command=["claude", "--model", "opus", "-p"]) == "opus"
+
+    fake = Fake(plan=plan_json([sub(1, "opencode"), sub(2, "qwen")]))
+    api.orch_factory = factory(project, fake)
+    plan = api.orchestrate_plan({
+        "goal": "split endpoint work across models",
+        "orchestrator": "claude",
+        "orchestrator_model": "opus",
+        "pool": ["opencode", "qwen"],
+        "agent_models": {"opencode": "opencode/big-pickle", "qwen": "qwen3:8b"},
+    })
+    assert plan["orchestrator_model"] == "opus"
+    assert [s["model"] for s in plan["subtasks"]] == ["opencode/big-pickle", "qwen3:8b"]
+
+    plan["subtasks"][0]["model"] = "opencode/deepseek-v4.1-flash-free"
+    sid = api.session_create({})["id"]
+    out = api.orchestrate_launch({"session_id": sid, "plan": plan})
+    run = api.runs[out["run_id"]]
+    assert wait_for(lambda: run.snapshot()["status"] in server.TERMINAL_RUN)
+    snap = api.run_detail(out["run_id"])
+    assert snap["orchestration"]["orchestrator_model"] == "opus"
+    assert snap["orchestration"]["subtasks"][0]["model"] == "opencode/deepseek-v4.1-flash-free"
+
+    plan_call = next(c for c in fake.calls if "Plan only" in c["prompt"])
+    synth_call = next(c for c in fake.calls if "write the final synthesis" in c["prompt"])
+    open_call = next(c for c in fake.calls if c["agent"] == "opencode")
+    qwen_call = next(c for c in fake.calls if c["agent"] == "qwen")
+    assert providers.model_of(command=plan_call["cmd"]) == "opus" and "--permission-mode" in plan_call["cmd"]
+    assert providers.model_of(command=synth_call["cmd"]) == "opus" and "--permission-mode" in synth_call["cmd"]
+    assert open_call["cmd"] == ["opencode", "run", "-m", "opencode/deepseek-v4.1-flash-free"]
+    assert qwen_call["cmd"] == ["ollama", "run", "qwen3:8b"]
+
+
+def test_scratch_workspace_starts_with_no_orchestrators_and_accepts_local_ollama_agent(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAOS_HARNESS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(providers.shutil, "which", lambda b: "/usr/bin/" + b)
+    app.init(tmp_path)
+    proj = app.load(tmp_path / "harness.toml")
+    a = Api(proj)
+    assert orchestrator.options(a.p, "")["orchestrators"] == []
+    out = a.add_agent({"kind": "local", "model": "qwen2.5:7b"})
+    assert out["name"] == "qwen2-5"
+    opts = orchestrator.options(a.p, "")
+    assert [o["name"] for o in opts["orchestrators"]] == ["qwen2-5"]
+    assert opts["orchestrators"][0]["model"] == "qwen2.5:7b"

@@ -70,10 +70,10 @@ export const WorktreePanel: React.FC<WorktreePanelProps> = ({ status, onChanged 
       <p className="muted wt-lead">Los cambios aislados nunca se fusionan solos en tu rama: se leen, se exportan como parche o se descartan.</p>
       <div className="wt-actions">
         <button type="button" className="btn btn-sm" disabled={busy} onClick={() => exportPatch()} title="Cambios sin confirmar del proyecto, como .patch">
-          <Download className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Parche del proyecto
+          <Download className="icon icon-sm" aria-hidden="true" />Parche del proyecto
         </button>
         <button type="button" className="btn btn-sm" disabled={busy || integrated.length === 0} onClick={cleanup} title="Quita los worktrees limpios cuyos commits ya están en la rama base">
-          <Sparkles className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Limpiar integrados ({integrated.length})
+          <Sparkles className="icon icon-sm" aria-hidden="true" />Limpiar integrados ({integrated.length})
         </button>
       </div>
       {msg && <p className="mono wt-msg" role="status">{msg}</p>}
@@ -85,7 +85,7 @@ export const WorktreePanel: React.FC<WorktreePanelProps> = ({ status, onChanged 
           return (
             <li key={k} className="wt-item">
               <div className="wt-item-head">
-                <GitBranch className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />
+                <GitBranch className="icon icon-sm" aria-hidden="true" />
                 <b className="mono">{ok?.branch ?? k}</b>
                 {ok && <span className="chip">{ok.integrated ? 'integrado' : ok.dirty > 0 ? `${ok.dirty} sin confirmar` : `${ok.ahead} commit(s) por delante`}</span>}
               </div>
@@ -102,9 +102,9 @@ export const WorktreePanel: React.FC<WorktreePanelProps> = ({ status, onChanged 
                 </>
               )}
               <div className="wt-actions">
-                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => exportPatch(k)}><Download className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Exportar .patch</button>
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => exportPatch(k)}><Download className="icon icon-sm" aria-hidden="true" />Exportar .patch</button>
                 <ConfirmButton className="btn btn-quiet btn-sm" disabled={busy} question={`¿Descartar ${k}? Su trabajo sin confirmar se pierde.`} confirmLabel="Descartar" onConfirm={() => discard(k)}>
-                  <Trash2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Descartar
+                  <Trash2 className="icon icon-sm" aria-hidden="true" />Descartar
                 </ConfirmButton>
               </div>
             </li>

@@ -160,20 +160,22 @@ describe('CAOS v2 unified Web UI', () => {
     vi.spyOn(api, 'getShareExports').mockResolvedValue({ exports: [], gdrive_connected: false })
   })
 
-  it('orders the header in 4 groups correctly and persists sidebar collapse + scope toggle', async () => {
+  it('orders the header in 4 groups, Run first, correctly and persists sidebar collapse + scope toggle', async () => {
     render(<App />)
     const tablist = await screen.findByRole('tablist', { name: 'Vistas principales' })
     const tabs = within(tablist).getAllByRole('tab')
-    expect(tabs.map((t) => t.getAttribute('data-tab'))).toEqual(['console', 'board', 'team', 'system'])
+    expect(tabs.map((t) => t.getAttribute('data-tab'))).toEqual(['run', 'board', 'team', 'system'])
 
-    const sidebar = screen.getByRole('complementary', { name: 'Contexto del proyecto' })
-    expect(sidebar.className).toContain('is-expanded')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Colapsar barra lateral' }))
-    expect(sidebar.className).toContain('is-collapsed')
-    expect(localStorage.getItem('caos_sidebar_collapsed')).toBe('1')
+    expect(screen.queryByRole('complementary', { name: 'Contexto del proyecto' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Expandir barra lateral' }))
+    const sidebar = screen.getByRole('complementary', { name: 'Contexto del proyecto' })
+    expect(sidebar.className).toContain('is-expanded')
+    expect(localStorage.getItem('caos_sidebar_collapsed')).toBe('0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Colapsar barra lateral' }))
+    expect(screen.queryByRole('complementary', { name: 'Contexto del proyecto' })).not.toBeInTheDocument()
+    expect(localStorage.getItem('caos_sidebar_collapsed')).toBe('1')
     fireEvent.click(screen.getByRole('button', { name: 'Global' }))
     expect(screen.getByRole('button', { name: 'Global' })).toHaveAttribute('aria-pressed', 'true')
   })
@@ -306,12 +308,14 @@ describe('CAOS v2 unified Web UI', () => {
     render(<App />)
     await openTab(/Models & Providers/i)
 
+    fireEvent.click(await screen.findByRole('tab', { name: /Modelos Locales/i }))
     await screen.findByText(/Ollama Multi-Host/i)
     fireEvent.click(screen.getByRole('button', { name: /Host LAN \/ Remoto/i }))
     fireEvent.change(screen.getByPlaceholderText('http://192.168.1.50:11434'), { target: { value: 'http://192.168.1.99:11434' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar Host' }))
     await waitFor(() => expect(hostSpy).toHaveBeenCalledWith({ url: 'http://192.168.1.99:11434', label: '' }))
 
+    fireEvent.click(screen.getByRole('tab', { name: /Router y Comparador/i }))
     const sel = await screen.findByRole('combobox', { name: 'Motor para codigo' })
     fireEvent.change(sel, { target: { value: 'anthropic::claude-sonnet-4-5' } })
     await waitFor(() => expect(intentSpy).toHaveBeenCalledWith('codigo', 'anthropic', 'claude-sonnet-4-5'))
@@ -324,7 +328,7 @@ describe('CAOS v2 unified Web UI', () => {
     const overview = await screen.findByRole('region', { name: 'Resumen del Board' })
     expect(screen.queryByLabelText(/Detalle tarea/)).not.toBeInTheDocument()          // no task is selected on its own
     expect(within(overview).getByText('Necesita de ti')).toBeInTheDocument()
-    expect(within(overview).getByText('Esperando por ti')).toBeInTheDocument()
+    expect(screen.getByText('Esperando por ti')).toBeInTheDocument()
     expect(await within(overview).findByText(/última visita/)).toBeInTheDocument()
     fireEvent.click(within(overview).getByRole('button', { name: /Bloqueados · necesita de ti/ }))
     expect(within(overview).queryByText(/delegada/)).not.toBeInTheDocument()          // the filter keeps only blocked and returned
@@ -351,27 +355,40 @@ describe('CAOS v2 unified Web UI', () => {
     await waitFor(() => expect(switchSpy).toHaveBeenCalledWith('/tmp/otro'))
   })
 
-  it('draws only the emblem on an empty Console, with one row of three starter pills and no preflight card', async () => {
+  it('keeps an empty Console free of emblem, instructions, and starter pills, showing up to 3 missions instead', async () => {
     vi.spyOn(api, 'getSession').mockResolvedValue({ id: 's1', title: 'Despacho QA', project: 'camiones-api', created_at: 1, updated_at: 2, mode: 'plan', commands_enabled: false, messages_count: 0, messages: [] } as any)
+    vi.spyOn(api, 'getMissions').mockResolvedValue({
+      scanned_files: 10,
+      has_git: true,
+      has_tests: true,
+      missions: [
+        { id: 'm1', kind: 'verify', score: 1, title: 'Revisar tests', subtitle: 'Cobertura', mode: 'plan', prompt: 'Revisa', citations: ['a.py:1'] },
+        { id: 'm2', kind: 'tests', score: 0.9, title: 'Ajustar ruta', subtitle: 'Endpoint', mode: 'act', prompt: 'Ajusta', citations: ['b.py:2'] },
+        { id: 'm3', kind: 'verify', score: 0.8, title: 'Auditar logs', subtitle: 'Errores', mode: 'plan', prompt: 'Audita', citations: [] },
+        { id: 'm4', kind: 'verify', score: 0.7, title: 'Extra oculta', subtitle: 'Sobra', mode: 'plan', prompt: 'No debe verse', citations: [] },
+      ],
+    })
     render(<App />)
-    const core = await screen.findByRole('region', { name: 'Work cycle' })
-    for (const stage of ['Plan', 'Act', 'Verify', 'Review']) expect(within(core).getByRole('button', { name: new RegExp(`${stage}`) })).toBeInTheDocument()
-    expect(within(core).getByRole('button', { name: /Verify.*mut 26\/26/ })).toBeInTheDocument()   // read from the real gates
-    expect(screen.queryByRole('button', { name: 'Topología' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('group', { name: 'Diseño del núcleo' })).not.toBeInTheDocument()
-    const row = screen.getByRole('group', { name: 'Arranques rápidos' })
-    expect(within(row).getAllByRole('button')).toHaveLength(3)
+    await screen.findByText('Revisar tests')
+    expect(screen.queryByRole('region', { name: 'Work cycle' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Arranques rápidos' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Extra oculta')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Lanzar' })).toHaveLength(3)
     expect(document.querySelector('.preflight-card')).toBeNull()                           // the preflight lives in the sidebar footer
+    fireEvent.click(screen.getByRole('button', { name: 'Expandir barra lateral' }))
     expect(within(screen.getByRole('complementary', { name: 'Contexto del proyecto' })).getByText('Listo')).toBeInTheDocument()
-    fireEvent.click(within(core).getByRole('button', { name: /Act/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Act' }))
     expect(screen.getByRole('button', { name: 'Act' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('keeps the Console bar to one line of controls and the navigation out of the sidebar', async () => {
+  it('keeps the Console bar to one line with Opciones popover and navigation out of the sidebar', async () => {
     render(<App />)
     const bar = (await screen.findByRole('group', { name: 'Modo de ejecución' })).parentElement as HTMLElement
     expect(bar.className).toContain('one-line')
+    const optsBtn = within(bar).getByRole('button', { name: /Opciones/ })
+    fireEvent.click(optsBtn)
     for (const name of [/Worktree aislado/, /^Pipeline$/, /^Inspector$/]) expect(within(bar).getByRole('button', { name })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Expandir barra lateral' }))
     const sidebar = screen.getByRole('complementary', { name: 'Contexto del proyecto' })
     expect(within(sidebar).queryByRole('button', { name: 'Board' })).not.toBeInTheDocument()
     expect(within(sidebar).queryByRole('button', { name: 'Providers' })).not.toBeInTheDocument()
@@ -501,6 +518,93 @@ describe('CAOS v2 unified Web UI', () => {
       const synth = await screen.findByRole('region', { name: 'Síntesis final' }, { timeout: 4000 })
       expect(synth).toHaveTextContent('SINTESIS: todo cumplido')
       expect(screen.getAllByRole('button', { name: /Board #1[12]/ })).toHaveLength(2)         // each card links to its task on the Board
+    })
+
+    it('lets the user choose orchestrator model and subagent models in bar, top selector and critical desk', async () => {
+      const richOpts = {
+        ...OPTIONS,
+        orchestrators: [
+          { ...OPTIONS.orchestrators[0], model: 'sonnet', models: ['sonnet', 'opus', 'haiku'] },
+          { ...OPTIONS.orchestrators[1], model: 'opencode/glm-5.3-flash-free', models: ['opencode/glm-5.3-flash-free', 'opencode/big-pickle'] },
+          { ...OPTIONS.orchestrators[2], models: ['qwen2.5:7b', 'qwen3:8b'] },
+        ],
+        pool: [
+          { ...OPTIONS.pool[0], model: 'sonnet', models: ['sonnet', 'opus', 'haiku'] },
+          { ...OPTIONS.pool[1], model: 'opencode/glm-5.3-flash-free', models: ['opencode/glm-5.3-flash-free', 'opencode/big-pickle'] },
+          { ...OPTIONS.pool[2], models: ['qwen2.5:7b', 'qwen3:8b'] },
+        ],
+      }
+      vi.spyOn(api, 'getOrchestrateOptions').mockResolvedValue(richOpts as any)
+      const richPlan = { ...PLAN, orchestrator_model: 'opus', subtasks: [{ ...PLAN.subtasks[0], model: 'opencode/big-pickle' }, { ...PLAN.subtasks[1], model: 'qwen2.5:7b' }] }
+      const planSpy = vi.spyOn(api, 'planOrchestration').mockResolvedValue(richPlan as any)
+      const launchSpy = vi.spyOn(api, 'launchOrchestration').mockResolvedValue({ run_id: 'run-orch', plan: richPlan } as any)
+      vi.spyOn(api, 'getRun').mockResolvedValue(runWith('running', 'delegating', ['running', 'running']) as any)
+
+      await openOrchestrate()
+      const bar = screen.getByRole('group', { name: 'Orquestación' })
+      const orchModelSel = within(bar).getByLabelText('Modelo del orquestador') as HTMLSelectElement
+      expect(orchModelSel.value).toBe('sonnet')
+      fireEvent.change(orchModelSel, { target: { value: 'opus' } })
+      expect(orchModelSel.value).toBe('opus')
+
+      // Top motor button reflects the active orchestrator + model and lets you switch model inside the popover
+      const motorBtn = screen.getByRole('button', { name: /claude · opus/ })
+      fireEvent.click(motorBtn)
+      const pop = await screen.findByRole('dialog', { name: 'Elegir motor' })
+      expect(within(pop).getByText('Orquestador y modelo activos')).toBeInTheDocument()
+      fireEvent.click(within(pop).getByRole('button', { name: /haiku/ }))
+      expect(orchModelSel.value).toBe('haiku')
+
+      // Subagent model selector inside the bar
+      fireEvent.change(within(bar).getByLabelText('Modelo de opencode'), { target: { value: 'opencode/big-pickle' } })
+
+      fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Separar modelos' } })
+      fireEvent.click(screen.getByRole('button', { name: /Planificar/ }))
+      await waitFor(() => expect(planSpy).toHaveBeenCalledWith(expect.objectContaining({
+        orchestrator: 'claude',
+        orchestrator_model: 'haiku',
+        agent_models: expect.objectContaining({ opencode: 'opencode/big-pickle' }),
+      })))
+
+      const desk = await screen.findByRole('region', { name: 'Mesa crítica de delegación' })
+      fireEvent.change(within(desk).getByLabelText('Modelo del orquestador del plan'), { target: { value: 'sonnet' } })
+      fireEvent.change(within(desk).getByLabelText('Modelo de la subtarea 1'), { target: { value: 'opencode/glm-5.3-flash-free' } })
+      fireEvent.click(within(desk).getByRole('button', { name: 'Lanzar 2 subagentes en paralelo' }))
+      await waitFor(() => expect(launchSpy).toHaveBeenCalled())
+      const [, sentPlan] = launchSpy.mock.calls[0] as any
+      expect(sentPlan.orchestrator_model).toBe('sonnet')
+      expect(sentPlan.subtasks[0].model).toBe('opencode/glm-5.3-flash-free')
+    })
+
+    it('keeps orchestration selectors and quick add actions visible even when the workspace has no AI agents yet', async () => {
+      vi.spyOn(api, 'getOrchestrateOptions').mockResolvedValue({
+        orchestrators: [],
+        pool: [{ name: 'echo', kind: 'command', family: null, installed: true, capable: false, model: null, models: [] }],
+        installable: [{ id: 'claude', label: 'Claude Code' }],
+        scouts: [],
+        suggested_scout: null,
+        tiers: {},
+        suggested: { name: null, reason: 'default', alternatives: [] },
+        default_orchestrator: null,
+      })
+      const addSpy = vi.spyOn(api, 'addAgent').mockResolvedValue({ name: 'claude', agents: ['claude'] })
+
+      await openOrchestrate()
+      const bar = await screen.findByRole('group', { name: 'Orquestación' })
+      expect(within(bar).getByLabelText('Orquestador')).toBeDisabled()
+      expect(within(bar).getByLabelText('Modelo del orquestador')).toBeDisabled()
+      expect(screen.getByRole('button', { name: /Planificar/ })).toBeDisabled()
+
+      const addBtn = within(bar).getByRole('button', { name: /Añadir claude/ })
+      fireEvent.click(addBtn)
+      await waitFor(() => expect(addSpy).toHaveBeenCalledWith({ kind: 'cli', id: 'claude' }))
+
+      // Top motor button also indicates missing orchestrator and opens quick-add options
+      const motorBtn = screen.getByRole('button', { name: /Sin orquestador/ })
+      fireEvent.click(motorBtn)
+      const pop = await screen.findByRole('dialog', { name: 'Elegir motor' })
+      expect(within(pop).getByText('CLIs instalados listos para añadir')).toBeInTheDocument()
+      expect(within(pop).getByText('Modelos locales en Ollama')).toBeInTheDocument()
     })
   })
 })

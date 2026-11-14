@@ -2,7 +2,33 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Eye, GitBranch, Loader2, Play, Plus, RefreshCw, Square, Trash2, Workflow } from '../icons'
 import { OrchestrateOptions, OrchestrationPlan, OrchestrationState, OrchestrationSubtask, SkillInfo, SubtaskRun } from '../api'
 import { pad } from '../lib'
+import { FamilyEmblem } from '../emblems'
 import { DiffViewer } from './DiffViewer'
+
+const shortModel = (m?: string | null): string => {
+  if (!m) return ''
+  const parts = m.split('/')
+  return parts.length > 1 ? parts[parts.length - 1] : m
+}
+
+const familyFor = (name: string): string => {
+  const s = name.toLowerCase()
+  if (s.includes('claude') || s.includes('haiku')) return 'claude'
+  if (s.includes('gemini') || s.includes('agy')) return 'agy'
+  if (s.includes('codex')) return 'codex'
+  if (s.includes('opencode') || s.includes('pickle')) return 'opencode'
+  if (s.includes('ollama') || s.includes('qwen') || s.includes('llama') || s.includes('local')) return 'local'
+  return 'api'
+}
+
+const modelsFor = (
+  info?: { family?: string | null; model?: string | null; models?: string[] } | null,
+  current?: string | null,
+  localModels: string[] = [],
+): string[] => {
+  const base = info?.family === 'local' ? [...(info.models ?? []), ...localModels] : (info?.models ?? [])
+  return Array.from(new Set([current || '', info?.model || '', ...base].filter(Boolean)))
+}
 
 const REASON: Record<string, string> = {
   local: 'trabaja 100 % local, sin red',
@@ -31,29 +57,74 @@ export const fmtElapsed = (ms: number): string => {
 interface BarProps {
   options: OrchestrateOptions
   orchestrator: string
+  orchestratorModel: string
   pool: string[]
+  agentModels: Record<string, string>
   onOrchestrator: (name: string) => void
+  onOrchestratorModel: (model: string) => void
   onPool: (pool: string[]) => void
+  onAgentModel: (agent: string, model: string) => void
   scout: string
   onScout: (scout: string) => void
   onAdd: (id: string) => void
+  onAddLocal?: (model: string) => void
   adding: string | null
+  localModels?: string[]
 }
 
-export const OrchestrateBar: React.FC<BarProps> = ({ options, orchestrator, pool, onOrchestrator, onPool, scout, onScout, onAdd, adding }) => {
+export const OrchestrateBar: React.FC<BarProps> = ({
+  options,
+  orchestrator,
+  orchestratorModel,
+  pool,
+  agentModels,
+  onOrchestrator,
+  onOrchestratorModel,
+  onPool,
+  onAgentModel,
+  scout,
+  onScout,
+  onAdd,
+  onAddLocal,
+  adding,
+  localModels = [],
+}) => {
   const sug = options.suggested
+  const hasOrch = options.orchestrators.length > 0
   const showSug = !!sug.name && sug.name !== orchestrator
+  const orchObj = options.orchestrators.find((o) => o.name === orchestrator)
+  const activeOrchModel = orchestratorModel || orchObj?.model || ''
+  const orchModels = modelsFor(orchObj, activeOrchModel, localModels)
   const workers = options.pool.filter((a) => a.kind !== 'command' || pool.includes(a.name))
+  const lanes = Math.min(4, new Set(pool).size)
   const toggle = (name: string) => onPool(pool.includes(name) ? pool.filter((n) => n !== name) : [...pool, name])
   return (
     <div className="orch-bar" role="group" aria-label="Orquestación">
       <label className="orch-pick">
         <span className="mono muted">Orquestador</span>
-        <select className="field field-sm" value={orchestrator} onChange={(e) => onOrchestrator(e.target.value)} aria-label="Orquestador">
-          {options.orchestrators.map((o) => (
-            <option key={o.name} value={o.name}>{o.name}{o.model ? ` · ${o.model}` : ''}</option>
-          ))}
+        <select className="field field-sm" value={orchestrator} disabled={!hasOrch} onChange={(e) => onOrchestrator(e.target.value)} aria-label="Orquestador">
+          {hasOrch ? (
+            options.orchestrators.map((o) => (
+              <option key={o.name} value={o.name}>{o.name}</option>
+            ))
+          ) : (
+            <option value="">Sin agente IA (añade uno →)</option>
+          )}
         </select>
+      </label>
+      <label className="orch-pick orch-model-pick">
+        <span className="mono muted">Modelo</span>
+        {!hasOrch ? (
+          <select className="field field-sm" value="" disabled aria-label="Modelo del orquestador">
+            <option value="">—</option>
+          </select>
+        ) : orchModels.length > 0 ? (
+          <select className="field field-sm" value={activeOrchModel} onChange={(e) => onOrchestratorModel(e.target.value)} aria-label="Modelo del orquestador">
+            {orchModels.map((m) => <option key={m} value={m}>{shortModel(m)}</option>)}
+          </select>
+        ) : (
+          <input className="field field-sm" value={activeOrchModel} placeholder="por defecto" onChange={(e) => onOrchestratorModel(e.target.value)} aria-label="Modelo del orquestador" />
+        )}
       </label>
       {showSug && (
         <button type="button" className="orch-suggest" onClick={() => onOrchestrator(sug.name!)} title={`Para este objetivo encaja mejor ${sug.name}: ${REASON[sug.reason] ?? sug.reason}`}>
@@ -72,17 +143,56 @@ export const OrchestrateBar: React.FC<BarProps> = ({ options, orchestrator, pool
       )}
       <div className="orch-pool" role="group" aria-label="Subagentes disponibles">
         <span className="mono muted">Subagentes</span>
-        {workers.map((a) => (
-          <button key={a.name} type="button" className="skill-chip orch-pill" aria-pressed={pool.includes(a.name)} disabled={!a.installed} onClick={() => toggle(a.name)}
-            title={a.installed ? `${a.name}${a.model ? ` · ${a.model}` : ''}` : `${a.name} no está instalado aquí`}>
-            {a.name}
-          </button>
-        ))}
+        {workers.map((a) => {
+          const selected = pool.includes(a.name)
+          const wCur = agentModels[a.name] || a.model || ''
+          const wModels = modelsFor(a, wCur, localModels)
+          return (
+            <div key={a.name} className={`orch-worker ${selected ? 'on' : ''}`}>
+              <button
+                type="button"
+                className="skill-chip orch-pill"
+                aria-pressed={selected}
+                disabled={!a.installed}
+                onClick={() => toggle(a.name)}
+                title={a.installed ? `${a.name}${wCur ? ` · ${wCur}` : ''}` : `${a.name} no está instalado aquí`}
+              >
+                {a.name}
+              </button>
+              {a.installed && wModels.length > 0 && (
+                <select
+                  className="field field-xs orch-worker-model"
+                  value={wCur}
+                  disabled={!selected}
+                  aria-label={`Modelo de ${a.name}`}
+                  onChange={(e) => onAgentModel(a.name, e.target.value)}
+                >
+                  {wModels.map((m) => <option key={m} value={m}>{shortModel(m)}</option>)}
+                </select>
+              )}
+            </div>
+          )
+        })}
+        {lanes > 0 && <span className="mono muted orch-lanes" title="Carriles paralelos simultáneos (máx. 4)">{`${lanes} carriles`}</span>}
+        {workers.length === 0 && (options.installable.length > 0 || (onAddLocal && localModels.length > 0)) && (
+          <span className="mono muted">· añade uno:</span>
+        )}
         {options.installable.map((c) => (
           <button key={c.id} type="button" className="btn btn-quiet btn-xs orch-add" disabled={adding === c.id} onClick={() => onAdd(c.id)} title={`${c.label} está instalado pero no está en harness.toml`}>
-            <Plus className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Añadir {c.id}
+            <Plus className="icon icon-xs" aria-hidden="true" />Añadir {c.id}
           </button>
         ))}
+        {!hasOrch && onAddLocal && localModels.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-quiet btn-xs orch-add"
+            disabled={adding === `local:${localModels[0]}`}
+            onClick={() => onAddLocal(localModels[0])}
+            title="Añadir este modelo local de Ollama como agente a harness.toml"
+          >
+            <Plus className="icon icon-xs" aria-hidden="true" />Añadir {shortModel(localModels[0])}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -97,13 +207,14 @@ interface DeskProps {
   canIsolate: boolean
   blocked: boolean
   busy: boolean
+  localModels?: string[]
   onChange: (plan: OrchestrationPlan) => void
   onReplan: () => void
   onLaunch: () => void
   onDiscard: () => void
 }
 
-export const CriticalDesk: React.FC<DeskProps> = ({ plan, options, skills, canIsolate, blocked, busy, onChange, onReplan, onLaunch, onDiscard }) => {
+export const CriticalDesk: React.FC<DeskProps> = ({ plan, options, skills, canIsolate, blocked, busy, localModels = [], onChange, onReplan, onLaunch, onDiscard }) => {
   const edit = (i: number, patch: Partial<OrchestrationSubtask>) =>
     onChange({ ...plan, source: 'edited', subtasks: plan.subtasks.map((s, k) => (k === i ? { ...s, ...patch } : s)) })
   const remove = (i: number) => onChange({ ...plan, source: 'edited', subtasks: plan.subtasks.filter((_, k) => k !== i) })
@@ -112,17 +223,28 @@ export const CriticalDesk: React.FC<DeskProps> = ({ plan, options, skills, canIs
     let n = plan.subtasks.length + 1
     while (used.has(`s${n}`)) n += 1
     const agent = plan.pool.find((a) => options.pool.some((p) => p.name === a)) ?? options.pool[0]?.name ?? plan.orchestrator
-    onChange({ ...plan, source: 'edited', subtasks: [...plan.subtasks, { id: `s${n}`, title: 'Nueva subtarea', agent, mode: 'readonly', skill: null, depends_on: [], scout: !!plan.scout && options.tiers[agent] === 'paid', task: '', criteria: '' }] })
+    const agentObj = options.pool.find((p) => p.name === agent)
+    onChange({
+      ...plan,
+      source: 'edited',
+      subtasks: [
+        ...plan.subtasks,
+        { id: `s${n}`, title: 'Nueva subtarea', agent, model: agentObj?.model ?? null, mode: 'readonly', skill: null, depends_on: [], scout: !!plan.scout && options.tiers[agent] === 'paid', task: '', criteria: '' },
+      ],
+    })
   }
   const n = plan.subtasks.length
   const incomplete = plan.subtasks.some((s) => !s.task.trim())
   const edits = plan.subtasks.filter((s) => s.mode === 'isolated').length
+  const planOrchObj = options.orchestrators.find((o) => o.name === plan.orchestrator)
+  const planOrchModel = plan.orchestrator_model ?? planOrchObj?.model ?? ''
+  const planOrchModels = modelsFor(planOrchObj, planOrchModel, localModels)
   return (
     <section className="orch-root orch-desk stagger-in" aria-label="Mesa crítica de delegación">
       <header className="orch-head">
-        <Workflow className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
+        <Workflow className="icon" aria-hidden="true" />
         <b>Mesa crítica de delegación</b>
-        <span className="mono muted">orquesta {plan.orchestrator}</span>
+        <span className="mono muted">orquesta {plan.orchestrator}{planOrchModel ? ` · ${shortModel(planOrchModel)}` : ''}</span>
         <span className="grow" />
         <button type="button" className="btn btn-quiet btn-xs" onClick={onDiscard}>Descartar</button>
       </header>
@@ -131,69 +253,124 @@ export const CriticalDesk: React.FC<DeskProps> = ({ plan, options, skills, canIs
       {plan.source === 'fallback' && <div className="banner warn orch-banner" role="status"><span>{plan.note || 'Propuesta del harness: edítala antes de lanzar.'}</span></div>}
 
       <ol className="orch-list">
-        {plan.subtasks.map((s, i) => (
-          <li key={s.id} className="orch-card stagger-in" style={{ ['--i' as string]: Math.min(i, 7) }}>
-            <div className="orch-card-head">
-              <span className="orch-num mono">{i + 1}</span>
-              <input className="field field-sm orch-title" value={s.title} maxLength={80} aria-label={`Título de la subtarea ${i + 1}`} onChange={(e) => edit(i, { title: e.target.value })} />
-              <button type="button" className="btn btn-quiet btn-icon btn-xs" onClick={() => remove(i)} aria-label={`Quitar la subtarea ${i + 1}`} disabled={n <= 1}>
-                <Trash2 className="icon" style={{ width: 13, height: 13 }} />
-              </button>
-            </div>
-            <div className="orch-controls">
-              <label className="orch-field">
-                <span className="mono muted">Agente</span>
-                <select className="field field-sm" value={s.agent} aria-label={`Agente de la subtarea ${i + 1}`} onChange={(e) => edit(i, { agent: e.target.value })}>
-                  {options.pool.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
-                </select>
-              </label>
-              <div className="seg orch-mode" role="group" aria-label={`Modo de la subtarea ${i + 1}`}>
-                <button type="button" aria-pressed={s.mode === 'readonly'} onClick={() => edit(i, { mode: 'readonly' })}><Eye className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Lectura (paralelo)</button>
-                <button type="button" aria-pressed={s.mode === 'isolated'} disabled={!canIsolate && s.mode !== 'isolated'} title={canIsolate ? 'Edita en su propio git worktree' : 'Necesita un repo git con al menos un commit: sin él correría en solo lectura'} onClick={() => edit(i, { mode: 'isolated' })}>
-                  <GitBranch className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Edición (worktree)
+        {plan.subtasks.map((s, i) => {
+          const workerObj = options.pool.find((a) => a.name === s.agent)
+          const subModel = s.model ?? workerObj?.model ?? ''
+          const subModels = modelsFor(workerObj, subModel, localModels)
+          return (
+            <li key={s.id} className="orch-card stagger-in" style={{ ['--i' as string]: Math.min(i, 7) }}>
+              <div className="orch-card-head">
+                <span className="orch-num mono">{i + 1}</span>
+                <input className="field field-sm orch-title" value={s.title} maxLength={80} aria-label={`Título de la subtarea ${i + 1}`} onChange={(e) => edit(i, { title: e.target.value })} />
+                {s.depends_on?.length > 0 && <span className="chip mono">depende de {s.depends_on.join(', ')}</span>}
+                <button type="button" className="btn btn-quiet btn-icon btn-xs" onClick={() => remove(i)} aria-label={`Quitar la subtarea ${i + 1}`} disabled={n <= 1}>
+                  <Trash2 className="icon icon-sm" />
                 </button>
               </div>
-              <label className="orch-field">
-                <span className="mono muted">Skill</span>
-                <select className="field field-sm" value={s.skill ?? ''} aria-label={`Skill de la subtarea ${i + 1}`} onChange={(e) => edit(i, { skill: e.target.value || null })}>
-                  <option value="">sin skill</option>
-                  {skills.map((sk) => <option key={sk.name} value={sk.name}>{sk.name}</option>)}
-                </select>
+              <div className="orch-controls">
+                <label className="orch-field">
+                  <span className="mono muted">Agente</span>
+                  <select
+                    className="field field-sm"
+                    value={s.agent}
+                    aria-label={`Agente de la subtarea ${i + 1}`}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      const nextObj = options.pool.find((a) => a.name === next)
+                      edit(i, { agent: next, model: nextObj?.model ?? null })
+                    }}
+                  >
+                    {options.pool.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+                  </select>
+                </label>
+                <label className="orch-field">
+                  <span className="mono muted">Modelo</span>
+                  {subModels.length > 0 ? (
+                    <select className="field field-sm" value={subModel} aria-label={`Modelo de la subtarea ${i + 1}`} onChange={(e) => edit(i, { model: e.target.value || null })}>
+                      {subModels.map((m) => <option key={m} value={m}>{shortModel(m)}</option>)}
+                    </select>
+                  ) : (
+                    <input className="field field-sm" value={subModel} placeholder="por defecto" aria-label={`Modelo de la subtarea ${i + 1}`} onChange={(e) => edit(i, { model: e.target.value || null })} />
+                  )}
+                </label>
+                <div className="seg orch-mode" role="group" aria-label={`Modo de la subtarea ${i + 1}`}>
+                  <button type="button" aria-pressed={s.mode === 'readonly'} onClick={() => edit(i, { mode: 'readonly' })}><Eye className="icon icon-xs" aria-hidden="true" />Lectura (paralelo)</button>
+                  <button type="button" aria-pressed={s.mode === 'isolated'} disabled={!canIsolate && s.mode !== 'isolated'} title={canIsolate ? 'Edita en su propio git worktree' : 'Necesita un repo git con al menos un commit: sin él correría en solo lectura'} onClick={() => edit(i, { mode: 'isolated' })}>
+                    <GitBranch className="icon icon-xs" aria-hidden="true" />Edición (worktree)
+                  </button>
+                </div>
+                <label className="orch-field">
+                  <span className="mono muted">Skill</span>
+                  <select className="field field-sm" value={s.skill ?? ''} aria-label={`Skill de la subtarea ${i + 1}`} onChange={(e) => edit(i, { skill: e.target.value || null })}>
+                    <option value="">sin skill</option>
+                    {skills.map((sk) => <option key={sk.name} value={sk.name}>{sk.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              {plan.scout && (
+                <label className="orch-field wide orch-scout" title={`${plan.scout} lee el repositorio antes y le pasa un resumen a ${s.agent}`}>
+                  <input type="checkbox" checked={s.scout} aria-label={`Lectura previa de la subtarea ${i + 1}`} onChange={(e) => edit(i, { scout: e.target.checked })} />
+                  <span className="mono muted">Lectura previa por {plan.scout}: {s.agent} va directo a la tarea</span>
+                </label>
+              )}
+              <label className="orch-field wide">
+                <span className="mono muted">Tarea</span>
+                <textarea className="field orch-task" rows={2} value={s.task} aria-label={`Tarea de la subtarea ${i + 1}`} placeholder="Qué debe hacer este agente, acotado y preciso" onChange={(e) => edit(i, { task: e.target.value })} />
               </label>
-            </div>
-            {plan.scout && (
-              <label className="orch-field wide orch-scout" title={`${plan.scout} lee el repositorio antes y le pasa un resumen a ${s.agent}`}>
-                <input type="checkbox" checked={s.scout} aria-label={`Lectura previa de la subtarea ${i + 1}`} onChange={(e) => edit(i, { scout: e.target.checked })} />
-                <span className="mono muted">Lectura previa por {plan.scout}: {s.agent} va directo a la tarea</span>
+              <label className="orch-field wide orch-crit-field">
+                <span className="mono">Criterio crítico de aceptación</span>
+                <textarea className="field orch-crit" rows={2} value={s.criteria} aria-label={`Criterio de la subtarea ${i + 1}`} placeholder="Qué debe demostrar su entrega para que la aceptes" onChange={(e) => edit(i, { criteria: e.target.value })} />
               </label>
-            )}
-            <label className="orch-field wide">
-              <span className="mono muted">Tarea</span>
-              <textarea className="field orch-task" rows={2} value={s.task} aria-label={`Tarea de la subtarea ${i + 1}`} placeholder="Qué debe hacer este agente, acotado y preciso" onChange={(e) => edit(i, { task: e.target.value })} />
-            </label>
-            <label className="orch-field wide orch-crit-field">
-              <span className="mono">Criterio crítico de aceptación</span>
-              <textarea className="field orch-crit" rows={2} value={s.criteria} aria-label={`Criterio de la subtarea ${i + 1}`} placeholder="Qué debe demostrar su entrega para que la aceptes" onChange={(e) => edit(i, { criteria: e.target.value })} />
-            </label>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ol>
 
       <footer className="orch-foot">
-        <button type="button" className="btn btn-quiet btn-xs" onClick={add} disabled={n >= 8}><Plus className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Subtarea</button>
+        <button type="button" className="btn btn-quiet btn-xs" onClick={add} disabled={n >= 8}><Plus className="icon icon-sm" aria-hidden="true" />Subtarea</button>
         <label className="orch-pick">
           <span className="mono muted">Orquestador</span>
-          <select className="field field-sm" value={plan.orchestrator} aria-label="Orquestador del plan" onChange={(e) => onChange({ ...plan, orchestrator: e.target.value, source: 'edited' })}>
+          <select
+            className="field field-sm"
+            value={plan.orchestrator}
+            aria-label="Orquestador del plan"
+            onChange={(e) => {
+              const next = e.target.value
+              const nextObj = options.orchestrators.find((o) => o.name === next)
+              onChange({ ...plan, orchestrator: next, orchestrator_model: nextObj?.model ?? null, source: 'edited' })
+            }}
+          >
             {options.orchestrators.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
           </select>
         </label>
+        <label className="orch-pick">
+          <span className="mono muted">Modelo</span>
+          {planOrchModels.length > 0 ? (
+            <select
+              className="field field-sm"
+              value={planOrchModel}
+              aria-label="Modelo del orquestador del plan"
+              onChange={(e) => onChange({ ...plan, orchestrator_model: e.target.value || null, source: 'edited' })}
+            >
+              {planOrchModels.map((m) => <option key={m} value={m}>{shortModel(m)}</option>)}
+            </select>
+          ) : (
+            <input
+              className="field field-sm"
+              value={planOrchModel}
+              placeholder="por defecto"
+              aria-label="Modelo del orquestador del plan"
+              onChange={(e) => onChange({ ...plan, orchestrator_model: e.target.value || null, source: 'edited' })}
+            />
+          )}
+        </label>
         <button type="button" className="btn btn-quiet btn-xs" onClick={onReplan} disabled={busy} title="Pide un plan nuevo al orquestador elegido: reemplaza lo que editaste">
-          <RefreshCw className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Re-planificar con {plan.orchestrator}
+          <RefreshCw className="icon icon-sm" aria-hidden="true" />Re-planificar con {plan.orchestrator}
         </button>
         <span className="grow" />
         {edits > 0 && !canIsolate && <span className="mono muted">sin repo git: correrán en solo lectura</span>}
         <button type="button" className="btn btn-primary btn-sm orch-launch" onClick={onLaunch} disabled={busy || blocked || n === 0 || incomplete}>
-          <Play className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />
+          <Play className="icon icon-sm" aria-hidden="true" />
           {n === 1 ? 'Lanzar 1 subagente' : `Lanzar ${n} subagentes en paralelo`}
         </button>
       </footer>
@@ -226,20 +403,33 @@ export const OrchestrationLive: React.FC<LiveProps> = ({ orch, live, onOpenTask,
     return () => window.clearInterval(t)
   }, [live, running])
   const done = orch.subtasks.filter((s) => s.state === 'delivered').length
+  const failed = orch.subtasks.filter((s) => s.state === 'failed').length
+  const stopped = orch.subtasks.filter((s) => s.state === 'cancelled').length
+  const statusSummary = [
+    `${done}/${orch.subtasks.length} listos`,
+    failed ? `${failed} fallaron` : '',
+    stopped ? `${stopped} detenidos` : '',
+    `orquesta ${orch.orchestrator}${orch.orchestrator_model ? ` · ${shortModel(orch.orchestrator_model)}` : ''}`,
+  ].filter(Boolean).join(' · ')
   return (
-    <section className="orch-root orch-live" aria-label="Subagentes en paralelo" aria-live="polite">
+    <section className="orch-root orch-live" aria-label="Subagentes en paralelo">
       <header className="orch-head">
-        <Workflow className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
+        <Workflow className="icon" aria-hidden="true" />
         <b>Subagentes en paralelo</b>
-        <span className="mono muted">{done}/{orch.subtasks.length} listos · orquesta {orch.orchestrator}</span>
+        <span className="mono muted">{statusSummary}</span>
         <span className="grow" />
-        {live && onStop && <button type="button" className="btn btn-xs" onClick={onStop}><Square className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Detener</button>}
+        {live && onStop && <button type="button" className="btn btn-xs" onClick={onStop}><Square className="icon icon-xs" aria-hidden="true" />Detener</button>}
       </header>
       <ol className="orch-grid">
         {orch.subtasks.map((s, i) => (
           <li key={s.id} className={`orch-card stagger-in state-${s.state}`} style={{ ['--i' as string]: Math.min(i, 7) }}>
             <div className="orch-card-head">
-              <span className="orch-agent"><b>{s.agent}</b>{s.state === 'running' && <span className="live-pulse" aria-hidden="true" />}</span>
+              <span className="orch-agent">
+                <FamilyEmblem family={s.family || familyFor(s.agent)} size={14} />
+                <b>{s.agent}</b>
+                {s.model && <small className="mono muted orch-sub-model">{shortModel(s.model)}</small>}
+                {s.state === 'running' && <span className="live-pulse" aria-hidden="true" />}
+              </span>
               <span className={`pill-mini ${STATE_TONE[s.state]}`}>{STATE_LABEL[s.state]}</span>
               <span className="grow" />
               <Elapsed s={s} at={at} now={now} />
@@ -260,11 +450,11 @@ export const OrchestrationLive: React.FC<LiveProps> = ({ orch, live, onOpenTask,
         ))}
       </ol>
       {orch.phase === 'synthesizing' && (
-        <div className="orch-synth pending" role="status"><Loader2 className="icon spin" style={{ width: 14, height: 14 }} aria-hidden="true" /><span>{orch.orchestrator} está sintetizando las entregas…</span></div>
+        <div className="orch-synth pending" role="status"><Loader2 className="icon spin icon-sm" aria-hidden="true" /><span>{orch.orchestrator} está sintetizando las entregas…</span></div>
       )}
       {orch.synthesis && (orch.phase === 'done' || orch.phase === 'stopped') && (
-        <section className="orch-synth" aria-label="Síntesis final">
-          <h4>Síntesis final · {orch.orchestrator}</h4>
+        <section className="orch-synth" aria-label="Síntesis final" aria-live="polite">
+          <h4>Síntesis final · {orch.orchestrator}{orch.orchestrator_model ? ` · ${shortModel(orch.orchestrator_model)}` : ''}</h4>
           <div className="turn-body">{orch.synthesis}</div>
         </section>
       )}

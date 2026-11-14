@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Cpu, ExternalLink, FolderGit2, FolderOpen, GitBranch, MessageSquare, Pencil, Plus, Search, ShieldCheck, Terminal, Trash2, Wrench } from '../icons'
+import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FolderGit2, FolderOpen, GitBranch, MessageSquare, Pencil, Plus, Search, Terminal, Trash2, Wrench } from '../icons'
 import { api, PreflightResponse, ProviderItem, SessionItem, Workspace, WorkspaceStatus } from '../api'
 import { isDesktop, openInFileManager, openInTerminal, pickWorkspaceFolder } from '../desktop'
 import { ago } from '../lib'
@@ -43,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [addingWs, setAddingWs] = useState(false)
   const [newPath, setNewPath] = useState('')
   const [wsErr, setWsErr] = useState<string | null>(null)
+  const [detectInfo, setDetectInfo] = useState<{ stacks: string[]; verify: string[] | null; engines: { name: string }[] } | null>(null)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -120,19 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setEditing(null)
   }
 
-  if (collapsed) {
-    return (
-      <aside className="sidebar is-collapsed" aria-label="Contexto del proyecto">
-        <button type="button" className="sb-icon-btn" onClick={onToggleCollapse} title={`Proyecto: ${project || 'workspace'} (expandir)`} aria-label="Expandir sidebar"><FolderOpen className="icon" style={{ width: 16, height: 16, color: 'var(--champan)' }} aria-hidden="true" /></button>
-        <button type="button" className="sb-icon-btn" onClick={onNewSession} title="Nueva sesión" aria-label="Nueva sesión"><Plus className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" /></button>
-        <button type="button" className="sb-icon-btn" onClick={onGoProviders} title={`Motores: Ollama ${ollama?.models.length ?? 0} · nube ${cloudReady}/${cloud.length}`} aria-label="Motores"><Cpu className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" /></button>
-        <button type="button" className="sb-icon-btn" onClick={onOpenPreflight} title={preflight ? `Preflight: ${VERDICT_WORD[preflight.verdict]}` : 'Preflight'} aria-label="Preflight">
-          <ShieldCheck className="icon" style={{ width: 16, height: 16 }} aria-hidden="true" />
-          {preflight && <i className={`dot ${VERDICT_DOT[preflight.verdict]} sb-pf-dot`} />}
-        </button>
-      </aside>
-    )
-  }
+  if (collapsed) return null
 
   return (
     <aside className="sidebar is-expanded" aria-label="Contexto del proyecto">
@@ -142,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span className="sb-ws-name">{project || 'workspace'}</span>
           <ChevronDown className="icon" style={{ width: 13, height: 13, marginLeft: 'auto' }} aria-hidden="true" />
         </button>
-        <button type="button" className="sb-collapse-btn" onClick={onToggleCollapse} aria-label="Colapsar sidebar" title="Colapsar"><ChevronLeft className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" /></button>
+        <button type="button" className="sb-collapse-btn" onClick={onToggleCollapse} aria-label="Colapsar sidebar" title="Colapsar"><ChevronLeft className="icon icon-sm" aria-hidden="true" /></button>
       </div>
 
       {wsOpen && (
@@ -157,7 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
                 {!w.current && (
                   <button type="button" className="sb-ws-del" aria-label={`Quitar ${w.name}`} onClick={async () => { await api.removeWorkspace(w.path); loadWorkspaces() }}>
-                    <Trash2 className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />
+                    <Trash2 className="icon icon-xs" aria-hidden="true" />
                   </button>
                 )}
               </li>
@@ -167,33 +156,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="sb-ws-actions">
               {desktop && (
                 <button type="button" className="btn btn-primary btn-sm" style={{ width: '100%' }} onClick={() => void handlePickFolder()}>
-                  <FolderOpen className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Explorar carpeta…
+                  <FolderOpen className="icon icon-sm" aria-hidden="true" />Explorar carpeta…
                 </button>
               )}
               <button type="button" className="btn btn-quiet btn-sm" style={{ width: '100%' }} onClick={() => setAddingWs(true)}>
-                <Plus className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Registrar ruta manual
+                <Plus className="icon icon-sm" aria-hidden="true" />Registrar ruta manual
               </button>
             </div>
           ) : (
             <form className="sb-ws-add" onSubmit={handleAddWorkspace}>
-              <input className="field field-sm" value={newPath} onChange={(e) => setNewPath(e.target.value)} placeholder="/ruta/absoluta/proyecto" required autoFocus />
-              <div className="row"><button type="submit" className="btn btn-primary btn-sm">Abrir</button><button type="button" className="btn btn-quiet btn-sm" onClick={() => setAddingWs(false)}>Cancelar</button></div>
+              <input className="field field-sm" value={newPath} onChange={(e) => { setNewPath(e.target.value); setDetectInfo(null) }} placeholder="/ruta/absoluta/proyecto" required autoFocus />
+              {detectInfo && (
+                <div className="sb-ws-detect muted mono">
+                  {`stack: ${detectInfo.stacks.join(', ') || 'generic'} · verify: ${detectInfo.verify ? detectInfo.verify.join(' ') : '—'} · ${detectInfo.engines.map((e) => e.name).join(', ')}`}
+                </div>
+              )}
+              <div className="row">
+                <button type="submit" className="btn btn-primary btn-sm">Abrir</button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => { if (newPath.trim()) api.detectWorkspace(newPath.trim()).then(setDetectInfo).catch((err: any) => setWsErr(err.message || 'Ruta inválida')) }}>Detectar</button>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => { setAddingWs(false); setDetectInfo(null) }}>Cancelar</button>
+              </div>
             </form>
           )}
         </div>
       )}
 
       <div className="sb-repo" aria-label="Estado del repositorio">
-        <span className="sb-repo-row"><GitBranch className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /><span className="mono">{wsStatus?.git_repo === false ? 'sin git' : wsStatus?.branch || '—'}</span></span>
+        <span className="sb-repo-row"><GitBranch className="icon icon-sm" aria-hidden="true" /><span className="mono">{wsStatus?.git_repo === false ? 'sin git' : wsStatus?.branch || '—'}</span></span>
         <span className="sb-repo-row">
           <i className={`dot ${dirtyCount > 0 ? 'amber' : 'sage'}`} />
           <span>{dirtyCount > 0 ? `${dirtyCount} cambio(s) sin confirmar` : 'árbol limpio'}</span>
         </span>
-        <span className="sb-repo-row muted"><FolderGit2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /><span>{wtCount > 0 ? `${wtCount} worktree(s) aislado(s)` : 'sin worktrees'}</span></span>
+        <span className="sb-repo-row muted"><FolderGit2 className="icon icon-sm" aria-hidden="true" /><span>{wtCount > 0 ? `${wtCount} worktree(s) aislado(s)` : 'sin worktrees'}</span></span>
         {desktop && rootPath && (
           <div className="sb-repo-bar">
-            <button type="button" className="btn btn-quiet btn-xs" onClick={() => void openInFileManager(rootPath)} title="Abrir carpeta en el gestor de archivos"><ExternalLink className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Carpeta</button>
-            <button type="button" className="btn btn-quiet btn-xs" onClick={() => void openInTerminal(rootPath)} title="Abrir terminal en este proyecto"><Terminal className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Terminal</button>
+            <button type="button" className="btn btn-quiet btn-xs" onClick={() => void openInFileManager(rootPath)} title="Abrir carpeta en el gestor de archivos"><ExternalLink className="icon icon-xs" aria-hidden="true" />Carpeta</button>
+            <button type="button" className="btn btn-quiet btn-xs" onClick={() => void openInTerminal(rootPath)} title="Abrir terminal en este proyecto"><Terminal className="icon icon-xs" aria-hidden="true" />Terminal</button>
           </div>
         )}
       </div>
@@ -201,10 +199,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="sb-sessions">
         <div className="sb-sess-head">
           <span className="sb-sec-title">Sesiones {scope === 'global' ? '· todos los proyectos' : ''}</span>
-          <button type="button" className="btn btn-xs" onClick={onNewSession} title="Nueva sesión"><Plus className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" />Nueva</button>
+          <button type="button" className="btn btn-xs" onClick={onNewSession} title="Nueva sesión"><Plus className="icon icon-xs" aria-hidden="true" />Nueva</button>
         </div>
         <div className="search-inline sb-search">
-          <Search className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />
+          <Search className="icon icon-sm" aria-hidden="true" />
           <input className="field field-sm" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar sesión…" aria-label="Buscar sesión" />
         </div>
         <ul className="sb-sess-list">
@@ -227,8 +225,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     {s.current && (
                       <span className="sb-sess-tools">
-                        <button type="button" className="x" aria-label={`Renombrar ${s.title}`} onClick={() => { setEditing(s.id); setEditText(s.title) }}><Pencil className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" /></button>
-                        <ConfirmButton className="x" ariaLabel={`Borrar ${s.title}`} question={`¿Borrar «${s.title}»?`} confirmLabel="Borrar" onConfirm={() => onDeleteSession(s.id)}><Trash2 className="icon" style={{ width: 12, height: 12 }} aria-hidden="true" /></ConfirmButton>
+                        <button type="button" className="x" aria-label={`Renombrar ${s.title}`} onClick={() => { setEditing(s.id); setEditText(s.title) }}><Pencil className="icon icon-xs" aria-hidden="true" /></button>
+                        <ConfirmButton className="x" ariaLabel={`Borrar ${s.title}`} question={`¿Borrar «${s.title}»?`} confirmLabel="Borrar" onConfirm={() => onDeleteSession(s.id)}><Trash2 className="icon icon-xs" aria-hidden="true" /></ConfirmButton>
                       </span>
                     )}
                   </>
@@ -243,14 +241,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="sb-foot">
         <button type="button" className="sb-foot-row" onClick={onGoProviders} title="Abrir Models & Providers">
           <i className={`dot ${(ollama?.status === 'online' || cloudReady > 0) ? 'sage' : 'coral'}`} />
-          <span>Ollama <b className="mono">{ollama?.models.length ?? 0}</b> mod · Nube <b className="mono">{cloudReady}/{cloud.length}</b> listos</span>
+          <span>Ollama <b className="mono">{ollama?.models.length ?? 0}</b> <span>modelos</span> · <span>Nube</span> <b className="mono">{cloudReady}/{cloud.length}</b> <span>listos</span></span>
         </button>
         <button type="button" className="sb-foot-row" onClick={onOpenPreflight} title="Ver el preflight completo">
           <i className={`dot ${preflight ? VERDICT_DOT[preflight.verdict] : ''}`} />
           <span>Preflight <b>{preflight ? VERDICT_WORD[preflight.verdict] : '…'}</b></span>
           <ChevronRight className="icon" style={{ width: 13, height: 13, marginLeft: 'auto' }} aria-hidden="true" />
         </button>
-        <span className="sb-foot-row muted"><Wrench className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" /><span>Tools y MCP <b className="mono">{toolsCount}</b></span></span>
+        <span className="sb-foot-row muted"><Wrench className="icon icon-sm" aria-hidden="true" /><span>Tools y MCP <b className="mono">{toolsCount}</b></span></span>
       </div>
     </aside>
   )

@@ -15,7 +15,7 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, run_id TEXT NOT NULL, source TEXT NOT NULL,
   kind TEXT NOT NULL, name TEXT, status TEXT, reason TEXT, seconds REAL, data TEXT);
 CREATE INDEX IF NOT EXISTS events_run ON events(run_id, seq);"""
-SOURCES = ("board", "agent", "validation", "review", "router")
+SOURCES = ("board", "agent", "validation", "review", "router", "landing")
 
 
 class Trace:

@@ -116,7 +116,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         <h2>Inspector</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={reload} disabled={busy} aria-label="Refresh inspector" title="Refresh files and diff">
-            <RefreshCw className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />
+            <RefreshCw className="icon" aria-hidden="true" />
           </button>
           <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={onClose} aria-label="Close inspector" title="Close (Ctrl-])">
             <X className="icon" aria-hidden="true" />
@@ -126,19 +126,19 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
       <div className="ctx-tabs" role="tablist" aria-label="Inspector sections" onKeyDown={onTabKeys}>
         <button type="button" role="tab" id="ctx-t-files" aria-controls="ctx-panel" aria-selected={tab === 'files'} tabIndex={tab === 'files' ? 0 : -1} onClick={() => setTab('files')}>
-          <FolderGit2 className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Files
+          <FolderGit2 className="icon icon-sm" aria-hidden="true" />Files
         </button>
         <button type="button" role="tab" id="ctx-t-diff" aria-controls="ctx-panel" aria-selected={tab === 'diff'} tabIndex={tab === 'diff' ? 0 : -1} onClick={() => setTab('diff')}>
-          <FileCode2 className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Diff{changedCount ? ` (${changedCount})` : ''}
+          <FileCode2 className="icon icon-sm" aria-hidden="true" />Diff{changedCount ? ` (${changedCount})` : ''}
         </button>
         <button type="button" role="tab" id="ctx-t-steps" aria-controls="ctx-panel" aria-selected={tab === 'steps'} tabIndex={tab === 'steps' ? 0 : -1} onClick={() => setTab('steps')}>
-          <ListChecks className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Pasos{steps.length ? ` (${steps.length})` : ''}
+          <ListChecks className="icon icon-sm" aria-hidden="true" />Pasos{steps.length ? ` (${steps.length})` : ''}
         </button>
         <button type="button" role="tab" id="ctx-t-worktree" aria-controls="ctx-panel" aria-selected={tab === 'worktree'} tabIndex={tab === 'worktree' ? 0 : -1} onClick={() => setTab('worktree')}>
-          <GitBranch className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Worktree{status?.worktrees?.length ? ` (${status.worktrees.length})` : ''}
+          <GitBranch className="icon icon-sm" aria-hidden="true" />Worktree{status?.worktrees?.length ? ` (${status.worktrees.length})` : ''}
         </button>
         <button type="button" role="tab" id="ctx-t-preview" aria-controls="ctx-panel" aria-selected={tab === 'preview'} tabIndex={tab === 'preview' ? 0 : -1} className={diffData && !diffData.preview ? 'is-empty' : undefined} onClick={() => { askedForPreview.current = true; setTab('preview') }}>
-          <Eye className="icon" style={{ width: 14, height: 14 }} aria-hidden="true" />Preview{diffData?.preview ? ' · ready' : ''}
+          <Eye className="icon icon-sm" aria-hidden="true" />Preview{diffData?.preview ? ' · ready' : ''}
         </button>
       </div>
 
@@ -150,7 +150,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             <small>{diffData.worktree.was_branch_pre_existing ? 'existing branch · protected' : 'isolated branch'}</small>
           </div>
           <ConfirmButton className="btn btn-quiet btn-sm" disabled={busy} title="Remove this isolated worktree" question={`Discard ${diffData.worktree.branch}? Its uncommitted work is lost.`} confirmLabel="Discard worktree" onConfirm={handleDiscardWt}>
-            <Trash2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />Discard
+            <Trash2 className="icon icon-sm" aria-hidden="true" />Discard
           </ConfirmButton>
         </div>
       )}
@@ -186,7 +186,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     </span>
                     {onAttachFile && (
                       <button type="button" className="btn btn-quiet btn-sm" onClick={() => onAttachFile(f.path)} title={`Attach @${f.path}`}>
-                        <FilePlus2 className="icon" style={{ width: 13, height: 13 }} aria-hidden="true" />
+                        <FilePlus2 className="icon icon-sm" aria-hidden="true" />
                       </button>
                     )}
                   </li>
@@ -235,7 +235,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         {tab === 'steps' && (
           steps.length > 0
             ? <ToolStepsView steps={steps} />
-            : <p className="ctx-empty"><ListChecks className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />Aún no hay pasos. Lo que el agente lea (Plan) o cambie (Act) aparece aquí mientras ocurre.</p>
+            : <p className="ctx-empty"><ListChecks className="icon" aria-hidden="true" />Aún no hay pasos. Lo que el agente lea (Plan) o cambie (Act) aparece aquí mientras ocurre.</p>
         )}
 
         {tab === 'worktree' && <WorktreePanel status={status} onChanged={() => { void reload(); onWorktreeDiscarded?.() }} />}
@@ -256,7 +256,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                 />
               </>
             ) : (
-              <p className="ctx-empty"><Eye className="icon" style={{ width: 15, height: 15 }} aria-hidden="true" />Nothing to preview: no changed <code>.html</code> or <code>.svg</code>. One written by an agent opens here, sandboxed.</p>
+              <p className="ctx-empty"><Eye className="icon" aria-hidden="true" />Nothing to preview: no changed <code>.html</code> or <code>.svg</code>. One written by an agent opens here, sandboxed.</p>
             )}
           </div>
         )}

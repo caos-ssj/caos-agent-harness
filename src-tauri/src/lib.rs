@@ -5,7 +5,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -85,41 +88,47 @@ fn generate_session_token() -> String {
     hex
 }
 
-fn augmented_path() -> String {
-    let current = env::var("PATH").unwrap_or_default();
-    let mut parts: Vec<String> = current
-        .split(':')
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string)
-        .collect();
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        let mut candidates = vec![
-            home.join(".local/bin"),
-            home.join(".cargo/bin"),
-            home.join(".npm-global/bin"),
-            home.join(".opencode/bin"),
-            PathBuf::from("/usr/local/bin"),
-        ];
-        let nvm_dir = home.join(".nvm/versions/node");
-        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
-            let mut vers: Vec<PathBuf> = entries
-                .filter_map(|e| e.ok().map(|x| x.path().join("bin")))
-                .filter(|p| p.is_dir())
-                .collect();
-            vers.sort();
-            vers.reverse();
-            candidates.extend(vers.into_iter().take(2));
-        }
-        for c in candidates {
-            if c.is_dir() {
-                let s = c.to_string_lossy().into_owned();
-                if !parts.iter().any(|p| p == &s) {
-                    parts.push(s);
-                }
+fn augmented_path() -> std::ffi::OsString {
+    let current = env::var_os("PATH").unwrap_or_default();
+    let mut parts: Vec<PathBuf> = env::split_paths(&current).collect();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")).map(PathBuf::from) {
+        candidates.push(home.join(".local/bin"));
+        candidates.push(home.join(".cargo/bin"));
+        candidates.push(home.join(".npm-global/bin"));
+        candidates.push(home.join(".opencode/bin"));
+        #[cfg(unix)]
+        {
+            candidates.push(PathBuf::from("/usr/local/bin"));
+            let nvm_dir = home.join(".nvm/versions/node");
+            if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+                let mut vers: Vec<PathBuf> = entries
+                    .filter_map(|e| e.ok().map(|x| x.path().join("bin")))
+                    .filter(|p| p.is_dir())
+                    .collect();
+                vers.sort();
+                vers.reverse();
+                candidates.extend(vers.into_iter().take(2));
             }
         }
     }
-    parts.join(":")
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = env::var_os("APPDATA").map(PathBuf::from) {
+            candidates.push(appdata.join("npm"));
+        }
+        if let Some(local_appdata) = env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+            candidates.push(local_appdata.join("Programs").join("Ollama"));
+            candidates.push(local_appdata.join("Microsoft").join("WinGet").join("Links"));
+            candidates.push(local_appdata.join("Programs").join("Microsoft VS Code").join("bin"));
+        }
+    }
+    for c in candidates {
+        if c.is_dir() && !parts.iter().any(|p| p == &c) {
+            parts.push(c);
+        }
+    }
+    env::join_paths(parts).unwrap_or(current)
 }
 
 fn find_repo_root() -> Option<PathBuf> {
@@ -142,6 +151,9 @@ fn find_repo_root() -> Option<PathBuf> {
 fn resolve_command(workspace: Option<&str>, token: &str) -> Command {
     let repo_root = find_repo_root();
     let path_env = augmented_path();
+    let sidecar_name = if cfg!(windows) { "caos-harness-sidecar.exe" } else { "caos-harness-sidecar" };
+    let venv_rel = if cfg!(windows) { ".venv/Scripts/python.exe" } else { ".venv/bin/python" };
+    let sys_python = if cfg!(windows) { "python" } else { "python3" };
 
     let mut cmd = if let Some(bin) = env::var_os("CAOS_HARNESS_PYTHON").filter(|v| !v.is_empty()) {
         let mut c = Command::new(bin);
@@ -149,7 +161,7 @@ fn resolve_command(workspace: Option<&str>, token: &str) -> Command {
         c
     } else if let Some(sidecar) = env::current_exe()
         .ok()
-        .and_then(|e| e.parent().map(|d| d.join("caos-harness-sidecar")))
+        .and_then(|e| e.parent().map(|d| d.join(sidecar_name)))
         .filter(|p| p.is_file())
     {
         let mut c = Command::new(sidecar);
@@ -157,14 +169,14 @@ fn resolve_command(workspace: Option<&str>, token: &str) -> Command {
         c
     } else if let Some(venv_py) = repo_root
         .as_ref()
-        .map(|r| r.join(".venv/bin/python"))
+        .map(|r| r.join(venv_rel))
         .filter(|p| p.is_file())
     {
         let mut c = Command::new(venv_py);
         c.args(["-m", "caos_harness", "serve"]);
         c
     } else {
-        let mut c = Command::new("python3");
+        let mut c = Command::new(sys_python);
         c.args(["-m", "caos_harness", "serve"]);
         c
     };
@@ -176,11 +188,13 @@ fn resolve_command(workspace: Option<&str>, token: &str) -> Command {
     if let Some(root) = repo_root {
         // No current_dir: the engine keeps the launcher's cwd, otherwise harness.toml in the repo root would
         // always win over the last-used workspace.
-        let pythonpath = match env::var("PYTHONPATH") {
-            Ok(cur) if !cur.is_empty() => format!("{}:{}", root.display(), cur),
-            _ => root.display().to_string(),
-        };
-        cmd.env("PYTHONPATH", pythonpath);
+        let mut pp = vec![root];
+        if let Some(cur) = env::var_os("PYTHONPATH").filter(|v| !v.is_empty()) {
+            pp.extend(env::split_paths(&cur));
+        }
+        if let Ok(joined) = env::join_paths(pp) {
+            cmd.env("PYTHONPATH", joined);
+        }
     }
 
     cmd.env("PATH", path_env);
@@ -191,7 +205,10 @@ fn resolve_command(workspace: Option<&str>, token: &str) -> Command {
     cmd.stderr(Stdio::piped());
     cmd.stdin(Stdio::null());
     // Own process group: stopping the app can signal the engine and everything it spawned in one go.
+    #[cfg(unix)]
     cmd.process_group(0);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0200); // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
     cmd
 }
 
@@ -298,6 +315,7 @@ fn spawn_backend(app: &AppHandle, state: &BackendState, workspace: Option<String
     Ok(())
 }
 
+#[cfg(unix)]
 fn signal_group(pid: u32, sig: i32) {
     // SAFETY: plain kill(2) on the engine's own process group (it was spawned with process_group(0)).
     unsafe {
@@ -310,21 +328,36 @@ pub fn stop_backend(state: &BackendState) {
     let child = state.child.lock().ok().and_then(|mut g| g.take());
     if let Some(mut child) = child {
         let pid = child.id();
-        signal_group(pid, libc::SIGTERM);
-        let deadline = Instant::now() + Duration::from_secs(4);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) | Err(_) => break,
-                Ok(None) if Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break;
+        #[cfg(unix)]
+        {
+            signal_group(pid, libc::SIGTERM);
+            let deadline = Instant::now() + Duration::from_secs(4);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) | Err(_) => break,
+                    Ok(None) if Instant::now() >= deadline => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(40)),
                 }
-                Ok(None) => std::thread::sleep(Duration::from_millis(40)),
             }
+            // Agents run in their own sessions; nothing of the engine's group may survive the engine.
+            signal_group(pid, libc::SIGKILL);
         }
-        // Agents run in their own sessions; nothing of the engine's group may survive the engine.
-        signal_group(pid, libc::SIGKILL);
+        #[cfg(windows)]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                .status();
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -413,37 +446,72 @@ fn open_in_terminal(path: String) -> Result<(), String> {
     if !dir.is_dir() {
         return Err(format!("Carpeta no encontrada: {path}"));
     }
-    let candidates: &[(&str, &[&str])] = &[
-        ("x-terminal-emulator", &["--working-directory"]),
-        ("gnome-terminal", &["--working-directory"]),
-        ("xfce4-terminal", &["--working-directory"]),
-        ("konsole", &["--workdir"]),
-        ("kitty", &["--directory"]),
-        ("alacritty", &["--working-directory"]),
-        ("tilix", &["--working-directory"]),
-    ];
-    for (bin, args) in candidates {
-        let mut cmd = Command::new(bin);
-        for a in *args {
-            cmd.arg(a);
-        }
-        cmd.arg(&dir);
-        cmd.current_dir(&dir);
-        cmd.stdin(Stdio::null());
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-        if cmd.spawn().is_ok() {
+    #[cfg(windows)]
+    {
+        if Command::new("wt")
+            .args(["-d"])
+            .arg(&dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .is_ok()
+        {
             return Ok(());
         }
+        if Command::new("powershell")
+            .args(["-NoExit", "-Command", &format!("Set-Location -LiteralPath '{}'", dir.display().to_string().replace('\'', "''"))])
+            .current_dir(&dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        return Command::new("cmd")
+            .args(["/K", "cd", "/d"])
+            .arg(&dir)
+            .current_dir(&dir)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("No se pudo abrir la terminal en Windows: {e}"));
     }
-    Command::new("xterm")
-        .current_dir(&dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("No se encontró un emulador de terminal compatible: {e}"))
+    #[cfg(not(windows))]
+    {
+        let candidates: &[(&str, &[&str])] = &[
+            ("x-terminal-emulator", &["--working-directory"]),
+            ("gnome-terminal", &["--working-directory"]),
+            ("xfce4-terminal", &["--working-directory"]),
+            ("konsole", &["--workdir"]),
+            ("kitty", &["--directory"]),
+            ("alacritty", &["--working-directory"]),
+            ("tilix", &["--working-directory"]),
+        ];
+        for (bin, args) in candidates {
+            let mut cmd = Command::new(bin);
+            for a in *args {
+                cmd.arg(a);
+            }
+            cmd.arg(&dir);
+            cmd.current_dir(&dir);
+            cmd.stdin(Stdio::null());
+            cmd.stdout(Stdio::null());
+            cmd.stderr(Stdio::null());
+            if cmd.spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        Command::new("xterm")
+            .current_dir(&dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("No se encontró un emulador de terminal compatible: {e}"))
+    }
 }
 
 #[tauri::command]
@@ -452,14 +520,15 @@ fn open_in_file_manager(path: String) -> Result<(), String> {
     if !dir.is_dir() {
         return Err(format!("Carpeta no encontrada: {path}"));
     }
-    Command::new("xdg-open")
+    let opener = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    Command::new(opener)
         .arg(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("xdg-open no disponible: {e}"))
+        .map_err(|e| format!("{opener} no disponible: {e}"))
 }
 
 fn focus_main_window(app: &AppHandle, navigate_to: Option<&str>) {
@@ -592,6 +661,7 @@ mod tests {
         assert_ne!(a, b);
     }
 
+    #[cfg(unix)]
     #[test]
     fn stop_backend_terminates_the_whole_process_group() {
         let state = BackendState::default();
